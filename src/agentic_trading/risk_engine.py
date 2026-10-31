@@ -71,7 +71,9 @@ def evaluate_order(proposal: OrderProposal) -> RiskDecision:
         reasons.append("INVALID_PRICE")
     if cash < 0 or equity <= 0:
         reasons.append("INVALID_PORTFOLIO_VALUES")
-    if proposal.current_position_quantity < 0:
+    if (not isinstance(proposal.current_position_quantity, int)
+            or isinstance(proposal.current_position_quantity, bool)
+            or proposal.current_position_quantity < 0):
         reasons.append("INVALID_EXISTING_POSITION")
     if not (Decimal("0") < max_position <= Decimal("1")):
         reasons.append("INVALID_POSITION_LIMIT")
@@ -87,7 +89,8 @@ def evaluate_order(proposal: OrderProposal) -> RiskDecision:
 
     if pnl <= -daily_loss_limit:
         reasons.append("DAILY_LOSS_LIMIT_REACHED")
-    if notional > max_notional:
+    total_position_notional = (price * proposal.current_position_quantity) + notional
+    if total_position_notional > max_notional:
         reasons.append("POSITION_NOTIONAL_LIMIT_EXCEEDED")
     if notional > cash:
         reasons.append("INSUFFICIENT_CASH")
