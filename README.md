@@ -1,19 +1,40 @@
 # Agentic Trading Lab
 
-Multi-agent AI equity research and paper-trading project for Indian markets (NSE/BSE), evolving from a US-market prototype to a Zerodha read-only integration.
+A reliability-first, multi-agent research and **paper-trading-only** platform for Indian equities (NSE/BSE). The project is being rebuilt incrementally with deterministic risk controls, auditable decisions and testable data pipelines.
 
-## Versions
-- `v1/`: Initial US-market prototype (AAPL/GOOGL/AMZN), OpenAI analyst committee, Yahoo Finance data, local paper broker.
-- `v2-india/`: India-market version with hybrid OpenAI/Anthropic/Gemini agents, INR paper portfolio and risk gates.
-- `v3-zerodha/`: India version plus a read-only Kite Connect bridge and local login callback.
+## Current engineering branch
 
-## Safety
-**Paper trading only. Live order placement is not implemented or enabled.** Zerodha does not provide an official Kite Connect sandbox, so use the local paper broker for simulated orders. Never commit API keys, secrets, access tokens, or account data. Copy `.env.example` to `.env` locally.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the ChatGPT / Antigravity / Claude workflow, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for system boundaries and [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) for milestones.
 
-## Limitations
-- Early prototypes use Yahoo Finance, which is not exchange-grade market data.
-- v3 Kite integration is read-only: profile, holdings, positions and margins.
-- Kite access tokens expire and must be refreshed through the official login flow.
-- Educational software only; not investment advice or a promise of returns.
+The `feature/reliable-foundation` branch currently introduces:
+- A documented AI-assisted contribution protocol.
+- A paper-only execution architecture decision.
+- A deterministic, standard-library risk engine.
+- Unit tests for core approval/rejection conditions.
+- Python project metadata and a GitHub Actions CI workflow.
 
-Each version directory contains its own README and setup instructions. Original ZIP snapshots are retained under `releases/`.
+## Safety boundary
+
+**Live order placement is not implemented or authorized.** AI agents can generate research proposals only. A deterministic risk engine must approve every paper order. Zerodha integration remains read-only. Do not commit API keys, access tokens, account statements or personal data.
+
+## Historical prototypes
+
+- `agentic_trading_lab.zip`: initial US-market prototype.
+- `agentic_trading_lab_v2_india.zip`: India-market hybrid-agent prototype.
+- `agentic_trading_lab_v3_zerodha_readonly.zip`: read-only Zerodha connector prototype.
+
+These are historical snapshots, not production-ready trading software. They are being preserved separately from the reliability-first rebuild.
+
+## Local development
+
+Python 3.11+:
+
+```bash
+python -m venv .venv
+# Windows PowerShell:
+.venv\\Scripts\\Activate.ps1
+python -m pip install -e ".[dev]"
+python -m pytest
+```
+
+Provider and broker integrations are optional extras. Unit tests should not require network access or broker credentials.
