@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentic-trading-lab"
+version = "0.4.0"
+description = "Auditable multi-agent research and paper-trading platform for Indian equities"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+providers = ["openai>=1.40", "anthropic>=0.34", "google-genai>=1.0"]
+market = ["yfinance>=0.2.40", "pandas>=2.2"]
+zerodha-readonly = ["kiteconnect>=5.0.1", "fastapi>=0.115", "uvicorn[standard]>=0.30", "keyring>=25"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
