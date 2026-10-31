@@ -14,10 +14,20 @@
 - [ ] Add currency-aware cash and equity accounting.
 - [ ] Add property-based tests for risk invariants.
 
-## Milestone 2 — Market data
+## Milestone 2a — Market data contracts and quality gate
+- [x] Canonical immutable candle model (open_time, close_time, Decimal precision, mandatory timezone-awareness).
+- [x] Explicit retrieval provenance (rejecting retrieval prior to bar close or after injected current time; no simulated default).
+- [x] In-progress candle rejection and exact close boundary evaluation.
+- [x] Deterministic fail-closed validation (positive OHLC, geometric bounds, non-negative volume).
+- [x] Non-contradictory validation results and immutable issue details (MappingProxyType).
+- [x] Sequence validation: generator inputs, graceful handling of naive timestamps, identical vs conflicting duplicate detection.
+- [x] Market-session aware gap detection (intraday gaps flagged; normal overnight and weekend closures exempted).
+- [x] Unit test suite and CI lint coverage for market data modules.
+
+## Milestone 2b — Exchange calendar, corporate actions and adapters
 - [ ] Separate provider adapters from normalized domain objects.
-- [ ] Record source, exchange, timezone, retrieval time and bar close time.
-- [ ] Handle NSE holidays, sessions, corporate actions and symbol changes.
+- [ ] Full NSE/BSE trading calendar, trading holidays, and special sessions.
+- [ ] Handle corporate actions (splits, bonuses, dividends) and symbol changes.
 - [ ] Add deterministic fixtures and replayable data snapshots.
 
 ## Milestone 3 — Paper broker and ledger

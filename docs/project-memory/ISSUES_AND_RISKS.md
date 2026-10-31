@@ -2,55 +2,53 @@
 
 Last reviewed: 2026-11-01
 
-## M2a — Must resolve before approval
+## M2a Remediated Audit Findings (Resolved in Working Tree)
 
-### R-001 — Nested validation details are mutable
-- Severity: High
-- Finding: `QualityIssue.details` wraps only the outer mapping with `MappingProxyType(dict(...))`; nested dictionaries/lists remain mutable.
-- Required: Recursive freezing of supported nested containers and tests proving nested mutation fails.
+### R-001 — Nested validation details mutable
+- Status: Resolved.
+- Fix: Implemented recursive freezing in `_deep_freeze()` converting nested dicts to `MappingProxyType`, lists to tuples, and sets to `frozenset`. Rejects unsupported mutable types with `TypeError` to guarantee immutability. Removed global `copy._deepcopy_dispatch` monkeypatch in favor of safe local design: added local `to_dict()` and `__reduce__()` methods to `QualityIssue` and `ValidationResult` for serialization without global side effects. Added regression tests for nested mutation attempts, unsupported types, serialization, and copy.deepcopy.
 
-### R-002 — Intraday gap detection can accept suspicious gaps
-- Severity: High
-- Finding: Current one-day date transition logic treats any next-date transition as normal overnight closure, even if the next candle is far into the session.
-- Required: Enforce regular-session boundaries where supported; distinguish normal overnight/weekend transitions from missing bars; emit `MARKET_CALENDAR_REQUIRED` when certainty requires a holiday/special-session calendar.
+### R-002 — Intraday and daily gap detection exchange holiday safety
+- Status: Resolved.
+- Fix: Enforced exact regular-session boundaries (closing bar must close exactly at 15:30 IST, opening bar must open exactly at 09:15 IST). Without reliable exchange calendar evidence (deferred to M2b), all multi-day transitions (including Friday-to-Monday weekend gaps and multi-day holiday gaps) emit `MARKET_CALENDAR_REQUIRED` for both intraday and daily candle sequences, rather than assuming no holiday or special session occurred. Only strictly consecutive calendar weekdays (e.g. Mon->Tue) are accepted without a calendar.
 
-### R-003 — Declared session boundaries are not enforced
-- Severity: Medium
-- Finding: `NSE_SESSION_OPEN` and `NSE_SESSION_CLOSE` are defined but current gap detection does not use them adequately.
-- Required: Implement meaningful boundary-aware logic and tests, or remove unsupported claims.
+### R-003 — Declared session boundaries enforced
+- Status: Resolved.
+- Fix: Used `NSE_SESSION_OPEN` (09:15) and `NSE_SESSION_CLOSE` (15:30) in `check_missing_intervals` for exact boundary verification. Tests added for premature close (15:20/15:25) and delayed open (10:30).
 
-### R-004 — Duplicate identity is too broad
-- Severity: High
-- Finding: Duplicate detection currently keys on timestamp alone.
-- Required: Identity must include exchange, symbol, interval, and UTC-normalized timestamp; compare OHLCV only for matching identity.
+### R-004 — Duplicate identity too broad
+- Status: Resolved.
+- Fix: Candle duplicate identity in `check_duplicate_timestamps` now includes exchange, symbol, interval, and UTC-normalized timestamp (`c.timestamp.astimezone(UTC)`). OHLCV comparison distinguishes identical duplicates (`DUPLICATE_CANDLE`) from conflicting duplicates (`CONFLICTING_DUPLICATE_DATA`).
 
-### R-005 — Malformed sequence elements can crash validation
-- Severity: High
-- Finding: Attribute and timestamp validation is incomplete for arbitrary iterable elements.
-- Required: Define input contract; malformed elements, None, invalid timestamp types, missing attributes, and timezone objects with `utcoffset() is None` should be handled deterministically with structured issues.
+### R-005 — Malformed sequence elements and no-bridging guarantee
+- Status: Resolved.
+- Fix: Implemented `check_candle_structure()` for complete structural pre-validation across all public entry points. Added `_is_tz_valid` and audited all datetime comparisons, subtraction, and astimezone conversions to catch corrupt or unstable `tzinfo` exceptions without leaking. Sequence validation functions (`check_duplicate_timestamps`, `check_sequence_monotonicity`, `check_missing_intervals`, `check_sequence_consistency`) break sequence continuity upon encountering malformed elements: they never silently skip malformed elements or bridge across them, and always preserve original sequence indices in `details["index"]`.
 
 ### R-006 — Timing argument validation incomplete
-- Severity: Medium
-- Finding: Validate `now` type/timezone and `max_staleness` type/non-negativity explicitly.
-- Required: Tests for invalid types, negative duration, zero staleness, and exact boundary behaviour.
+- Status: Resolved.
+- Fix: `_validate_now_and_staleness()` strictly rejects non-datetime types (including bool), naive datetimes, and tzinfo implementations that raise exceptions with `TypeError`/`ValueError`. Rejects non-timedelta (including bool) and negative staleness. Tested boundary at exact bar close and zero staleness.
 
 ### R-007 — Constructor versus quality-gate timing contract
-- Severity: Medium
-- Finding: Candle construction may permit retrieval before bar close; quality validation is expected to reject it.
-- Required: Make this separation explicit and ensure invalid provenance can never pass the authoritative validation gate.
+- Status: Resolved.
+- Fix: `Candle.create()` strictly requires explicit provenance (`source`) and retrieval timestamp (`retrieval_timestamp`); no simulated defaults or timestamp fabrication permitted. Floats and booleans rejected with `TypeError`. Authoritative gate `validate_candle` enforces `open_time < close_time <= retrieval_timestamp <= now`.
 
-### R-008 — CI lint scope narrowed temporarily
-- Severity: Medium
-- Finding: CI now lints market-data source/tests only to avoid known pre-existing Ruff violations in risk-engine source/tests.
-- Required: Track and later resolve repository-wide lint baseline; do not permanently lose risk-engine lint coverage.
+### R-008 — CI lint scope
+- Status: Resolved.
+- Fix: `.github/workflows/ci.yml` retains the pre-existing risk-engine Ruff check AND adds the market-data Ruff check as separate, non-weakening steps. Ruff is pinned to `ruff==0.17.3` in `pyproject.toml`.
 
-## Repository / workflow
-- An untracked path `cls` was reported by `git status`; inspect before deleting.
-- Local branch synchronization with remote README commit `0cba422` is pending; protect local uncommitted M2a changes.
-- Windows LF-to-CRLF warnings were observed. They are not currently diff-check failures; consider a deliberate `.gitattributes` policy separately.
+### R-009 — check_gaps=False did not disable gap detection
+- Status: Resolved.
+- Fix: `validate_candle_sequence(..., check_gaps=False)` now bypasses `check_missing_intervals` entirely while continuing to run structural validation, duplicate detection, and monotonicity validation.
+
+### R-010 — Malformed interval inference crash
+- Status: Resolved.
+- Fix: Interval inference in `check_missing_intervals` and `validate_candle_sequence` only accepts validated `CandleInterval` enum instances, ignoring arbitrary string or numeric interval attributes. Invalid interval values produce structured `MALFORMED_CANDLE` issues.
 
 ## Deferred to M2b
-- Full NSE/BSE trading calendar, holidays, special sessions.
-- Provider adapters and normalized ingestion boundaries.
-- Corporate actions and symbol changes.
-- Deterministic replayable data snapshots.
+- Full NSE/BSE trading calendar, trading holidays, and special sessions (e.g. Muhurat trading). Until M2b, unverified calendar gaps fail closed with `MARKET_CALENDAR_REQUIRED`.
+- Provider adapters and normalized ingestion boundaries (e.g. Zerodha Kite read-only connector).
+- Corporate actions (splits, bonuses, dividends) and symbol changes.
+- Deterministic fixtures and replayable data snapshots.
+
+## Active Engineering Risks
+- Python 3.11 CI compatibility: Local checks run on Python 3.14.4 (Windows 11). While standard syntax and typing are 3.11-compliant, full confirmation depends on GitHub Actions CI.

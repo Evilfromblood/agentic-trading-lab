@@ -23,3 +23,4 @@ jobs:
       - run: python -m compileall -q src tests
       - run: python -m pytest
       - run: python -m ruff check src/agentic_trading/risk_engine.py tests/test_risk_engine.py
+      - run: python -m ruff check src/agentic_trading/market_data tests/test_market_data_models.py tests/test_market_data_quality.py
