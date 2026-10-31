@@ -193,3 +193,17 @@ python -m pytest
 ```
 
 Provider and broker integrations are optional extras. Unit tests should not require network access or broker credentials.
+
+
+## 7. Durable project memory
+
+The `docs/project-memory/` directory is the detailed continuity record. Keep it current so a new ChatGPT conversation or another collaborator can resume without copying chat history.
+
+- [Current state](docs/project-memory/CURRENT_STATE.md) — branch, commits, local/remote status, validation evidence.
+- [Decision log](docs/project-memory/DECISION_LOG.md) — accepted architectural and workflow decisions.
+- [Issues and risks](docs/project-memory/ISSUES_AND_RISKS.md) — open findings, severity, remediation requirements.
+- [Next actions](docs/project-memory/NEXT_ACTIONS.md) — exact ordered continuation steps and commands.
+- [Session log](docs/project-memory/SESSION_LOG.md) — chronological record of verified work.
+- [Agent handoff](docs/project-memory/AGENT_HANDOFF.md) — operating instructions for ChatGPT, Antigravity, Claude, and human approval gates.
+
+**Update discipline:** after every meaningful work session, update the relevant memory files and then refresh this README's concise status and links. Record facts and verified outcomes; distinguish local uncommitted work from remote commits and CI evidence. Never store credentials, tokens, personal account data, or secrets in project memory.
