@@ -1,0 +1,10 @@
+[project]
+name = "agentic-trading-lab-india"
+version = "0.3.0"
+description = "Hybrid multi-model AI research and paper-trading system for Indian equities"
+requires-python = ">=3.11"
+dependencies = ["openai>=1.40.0", "anthropic>=0.34.0", "google-genai>=1.0.0", "pydantic>=2.7.0", "python-dotenv>=1.0.1", "yfinance>=0.2.40", "rich>=13.7.1", "kiteconnect>=5.0.1", "fastapi>=0.115.0", "uvicorn[standard]>=0.30.0", "keyring>=25.0.0"]
+[project.scripts]
+agentic-trader = "agentic_trading.cli:main"
+[tool.pytest.ini_options]
+pythonpath = ["src"]
