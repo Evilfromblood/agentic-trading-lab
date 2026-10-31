@@ -58,3 +58,15 @@ def test_rejects_zero_quantity():
     result = evaluate_order(proposal(quantity=0))
     assert result.approved is False
     assert "INVALID_QUANTITY" in result.reason_codes
+
+
+def test_rejects_order_that_pushes_total_position_over_limit():
+    result = evaluate_order(proposal(quantity=2, current_position_quantity=4))
+    assert result.approved is False
+    assert "POSITION_NOTIONAL_LIMIT_EXCEEDED" in result.reason_codes
+
+
+def test_rejects_invalid_existing_position_type():
+    result = evaluate_order(proposal(current_position_quantity=True))
+    assert result.approved is False
+    assert "INVALID_EXISTING_POSITION" in result.reason_codes
