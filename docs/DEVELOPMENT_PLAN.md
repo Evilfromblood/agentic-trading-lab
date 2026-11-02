@@ -1,56 +1,79 @@
-# Development plan
+# Development Plan
 
-## Milestone 0 — Engineering foundation
-- [x] Define AI-assisted contribution and review workflow.
-- [x] Record paper-only execution boundary.
-- [x] Add deterministic risk-engine baseline and unit tests.
-- [ ] Add CI and make the first branch green.
-- [ ] Restore and version the three historical prototype snapshots.
+## Product direction (accepted 2026-11-03)
 
-## Milestone 1 — Domain and risk controls
-- [ ] Define canonical instrument, candle, signal, proposal, order, fill and position models.
-- [ ] Add market-data freshness and integrity validation.
-- [ ] Add portfolio-wide exposure, concentration and open-order checks.
-- [ ] Add currency-aware cash and equity accounting.
-- [ ] Add property-based tests for risk invariants.
+Build one Agentic Trading Lab platform supporting:
+- India: NSE and BSE.
+- United States: NYSE and NASDAQ.
 
-## Milestone 2a — Market data contracts and quality gate
-- [x] Canonical immutable candle model (open_time, close_time, Decimal precision, mandatory timezone-awareness).
-- [x] Explicit retrieval provenance (rejecting retrieval prior to bar close or after injected current time; no simulated default).
-- [x] In-progress candle rejection and exact close boundary evaluation.
-- [x] Deterministic fail-closed validation (positive OHLC, geometric bounds, non-negative volume).
-- [x] Non-contradictory validation results and immutable issue details (MappingProxyType).
-- [x] Sequence validation: generator inputs, graceful handling of naive timestamps, identical vs conflicting duplicate detection.
-- [x] Market-session aware gap detection (intraday gaps flagged; normal overnight and weekend closures exempted).
-- [x] Unit test suite and CI lint coverage for market data modules.
+Extend the existing codebase. Use a shared domain, strategy, simulation and risk core with market-specific adapters for instruments, sessions, calendars, currencies, data and transaction costs.
 
-## Milestone 2b — Exchange calendar, corporate actions and adapters
-- [ ] Separate provider adapters from normalized domain objects.
-- [ ] Full NSE/BSE trading calendar, trading holidays, and special sessions.
-- [ ] Handle corporate actions (splits, bonuses, dividends) and symbol changes.
-- [ ] Add deterministic fixtures and replayable data snapshots.
+**First major product priority:** Time Machine — historical backtesting and reproducible Monte Carlo simulation — after M2b and the cross-market data/strategy foundations are reliable.
 
-## Milestone 3 — Paper broker and ledger
-- [ ] Implement order lifecycle and partial fills.
-- [ ] Model brokerage, STT, GST, exchange charges and stamp duty by instrument/segment.
-- [ ] Make ledger events append-only and reconcile positions/cash.
-- [ ] Add restart/recovery tests.
+**Safety boundary:** Strictly paper-only. No real-money execution, no autonomous live trading and no agent access to broker order-placement APIs. AI agents may research and propose; deterministic risk controls remain authoritative. Missing, stale, malformed or contradictory data fails closed.
 
-## Milestone 4 — Agent research
-- [ ] Define strict JSON schemas and prompt/version tracking.
-- [ ] Run bull, bear and quant agents independently.
-- [ ] Add evidence citations, uncertainty and stale-data rejection.
-- [ ] Add disagreement-aware aggregation; no agent has execution authority.
+## Current execution order
 
-## Milestone 5 — Backtesting
-- [ ] Prevent look-ahead and survivorship bias.
-- [ ] Include costs, slippage, liquidity and realistic order timing.
-- [ ] Use walk-forward and out-of-sample evaluation.
-- [ ] Report drawdown, volatility, Sharpe, turnover and benchmark comparison.
+### M2b — Market data ingestion and provider reliability (in progress; audit remediation)
+- [ ] Complete independent review remediation.
+- [ ] Validate provider provenance, strict raw-data normalization and immutable result contracts.
+- [ ] Validate interval grid, session membership, overlaps and session-truncated bars.
+- [ ] Validate historical retrieval timestamps and live freshness boundaries.
+- [ ] Validate historical coverage semantics and calendar limitations.
+- [ ] Verify Python 3.11/3.14, full tests, Ruff, compile checks and adversarial regressions.
+- [ ] Produce a new frozen audit bundle and pass independent remediation verification.
 
-## Milestone 6 — Operations
-- [ ] Read-only broker reconciliation.
-- [ ] Paper-trading dashboard, alerting and audit exports.
-- [ ] Security review and operational runbooks.
+### M2c — Cross-market data and instrument foundation
+- [ ] Shared market/exchange/instrument abstractions.
+- [ ] NSE/BSE and NYSE/NASDAQ instrument identity and symbol mapping.
+- [ ] Exchange-specific sessions, holidays and special-session modelling.
+- [ ] Historical data adapters and source provenance.
+- [ ] INR/USD-aware representation and currency conversion boundaries.
+- [ ] Corporate-action and adjusted/unadjusted data semantics where supported.
+- [ ] Provider-specific incomplete-bar and no-trade interval contracts.
 
-A milestone is complete only when its acceptance criteria are testable, automated checks pass, and the changes have independent review.
+### M3 — Strategy and deterministic simulation foundation
+- [ ] Strategy configuration and versioned entry/exit rules.
+- [ ] Deterministic candle-by-candle simulation contracts.
+- [ ] Portfolio, cash, position sizing and exposure accounting.
+- [ ] Transaction costs, taxes/fees by market and instrument, slippage and gap assumptions.
+- [ ] Deterministic portfolio-level risk controls.
+- [ ] Validated market-data-to-simulation pipeline; no look-ahead or survivorship leakage.
+
+### M4 — Time Machine (first major product milestone)
+- [ ] Select market, exchange, instrument and historical period.
+- [ ] Configure and run strategies over historical data.
+- [ ] Reproducible Monte Carlo runs with recorded seeds and assumptions.
+- [ ] Conservative handling when stop and target are both touched within one candle.
+- [ ] Model transaction costs, slippage, position sizing and incomplete sessions.
+- [ ] Report expectancy, average R, win rate, drawdown, exposure and return distributions.
+- [ ] Preserve data, strategy, configuration and seed provenance for reproducibility.
+- [ ] Present uncertainty and limitations; simulations are not predictions or guarantees.
+
+### M5 — Paper trading engine
+- [ ] Simulated order lifecycle, fills and portfolio ledger.
+- [ ] Deterministic risk approval before simulated execution.
+- [ ] Restart/recovery, reconciliation and audit trail.
+- [ ] No real broker order-placement connectivity.
+
+### M6 — Market intelligence and multi-agent research
+- [ ] Market scanner and instrument research.
+- [ ] News, earnings and event analysis with source provenance.
+- [ ] Strategy, entry/exit and portfolio-risk research agents.
+- [ ] Agents can produce analysis and proposals only; no execution authority.
+
+### M7 — Analytics and decision dashboard
+- [ ] Cross-market portfolio and strategy analytics.
+- [ ] Backtest and Monte Carlo visualisations.
+- [ ] Paper-trading performance and data-quality views.
+- [ ] Audit exports and research history.
+
+## Deferred / excluded
+- Real-money trading and live broker order placement.
+- Autonomous agent execution.
+- Unrestricted broker permissions.
+- Separate duplicated India and US platforms.
+- News-driven live execution before the Time Machine and risk foundations are validated.
+
+## Historical plan note
+Earlier milestone labels and sequencing below this point were superseded by the accepted product direction above. Historical completed work and decisions should not be silently rewritten.
