@@ -190,7 +190,7 @@ def test_exchange_enum_and_string_normalization() -> None:
     assert candle_bse.exchange == Exchange.BSE
 
     with pytest.raises(ValueError, match="Invalid exchange"):
-        sample_candle(exchange="NASDAQ")
+        sample_candle(exchange="INVALID_EXCHANGE")
 
     with pytest.raises(TypeError, match="exchange must be Exchange or str"):
         sample_candle(exchange=123)

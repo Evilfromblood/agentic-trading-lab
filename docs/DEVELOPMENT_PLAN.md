@@ -25,10 +25,10 @@
 - [x] Unit test suite and CI lint coverage for market data modules.
 
 ## Milestone 2b — Exchange calendar, corporate actions and adapters
-- [ ] Separate provider adapters from normalized domain objects.
+- [x] Separate provider adapters from normalized domain objects.
+- [ ] Add deterministic fixtures and replayable data snapshots (synthetic sample generator implemented in-memory; file-based replay fixtures and session replay not yet implemented).
 - [ ] Full NSE/BSE trading calendar, trading holidays, and special sessions.
 - [ ] Handle corporate actions (splits, bonuses, dividends) and symbol changes.
-- [ ] Add deterministic fixtures and replayable data snapshots.
 
 ## Milestone 3 — Paper broker and ledger
 - [ ] Implement order lifecycle and partial fills.

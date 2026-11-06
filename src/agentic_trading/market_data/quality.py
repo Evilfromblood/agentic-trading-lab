@@ -20,12 +20,37 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 from enum import Enum
-from types import MappingProxyType
 from typing import Any
 
-from agentic_trading.market_data.models import IST, CandleInterval, Exchange
+from agentic_trading.market_data.models import (
+    DEFAULT_EXCHANGE_SESSION,
+    CandleInterval,
+    Exchange,
+    ExchangeCalendar,
+    ExchangeSession,
+    _deep_freeze,
+)
+
 
 # Standard NSE/BSE Equity continuous trading session boundaries in IST
+def _is_valid_session_close(close_time: datetime, step: timedelta) -> bool:
+    """Return True if close_time represents a valid end-of-session bar close.
+
+    Continuous NSE regular equity session runs 09:15 to 15:30 IST (375 minutes).
+    - Intervals dividing 375m evenly (M1, M3, M5, M15) close exactly at 15:30:00 IST.
+    - Intervals not dividing 375m evenly:
+      * H1 (60m): 6 bars reach 15:15:00 IST. An optional 15m truncated bar reaches 15:30:00 IST.
+      * M30 (30m): 12 bars reach 15:15:00 IST. An optional 15m truncated bar reaches 15:30:00 IST.
+      * M10 (10m): 37 bars reach 15:25:00 IST. An optional 5m truncated bar reaches 15:30:00 IST.
+    """
+    t = close_time.time()
+    return (
+        t == NSE_SESSION_CLOSE
+        or (step in (timedelta(hours=1), timedelta(minutes=30)) and t == time(15, 15))
+        or (step == timedelta(minutes=10) and t == time(15, 25))
+    )
+
+
 NSE_SESSION_OPEN = time(9, 15)
 NSE_SESSION_CLOSE = time(15, 30)
 
@@ -55,29 +80,13 @@ class DataQualityErrorCode(str, Enum):
     INCONSISTENT_INTERVAL = "INCONSISTENT_INTERVAL"
     EMPTY_SEQUENCE = "EMPTY_SEQUENCE"
     MALFORMED_CANDLE = "MALFORMED_CANDLE"
+    OVERLAPPING_CANDLE = "OVERLAPPING_CANDLE"
+    OFF_GRID_TIMESTAMP = "OFF_GRID_TIMESTAMP"
+    OUTSIDE_SESSION = "OUTSIDE_SESSION"
+    EXCHANGE_MISMATCH = "EXCHANGE_MISMATCH"
 
 
-_ALLOWED_PRIMITIVE_TYPES = (
-    str, int, float, bool, Decimal, datetime, time, timedelta, Enum, bytes, type(None)
-)
-
-
-def _deep_freeze(obj: Any) -> Any:
-    """Recursively freeze mutable mappings, lists, and sets into immutable types.
-
-    Rejects unsupported mutable types to guarantee deep immutability.
-    """
-    if isinstance(obj, Mapping):
-        return MappingProxyType({k: _deep_freeze(v) for k, v in obj.items()})
-    if isinstance(obj, (list, tuple)):
-        return tuple(_deep_freeze(v) for v in obj)
-    if isinstance(obj, (set, frozenset)):
-        return frozenset(_deep_freeze(v) for v in obj)
-    if isinstance(obj, _ALLOWED_PRIMITIVE_TYPES):
-        return obj
-    raise TypeError(
-        f"Unsupported mutable or unhandled type in QualityIssue.details: {type(obj).__name__}"
-    )
+# Unified _deep_freeze imported from models.py
 
 
 
@@ -93,7 +102,7 @@ def _validate_now_and_staleness(now: Any, max_staleness: Any) -> None:
             )
         try:
             offset = now.tzinfo.utcoffset(now)
-        except Exception as exc:
+        except (AttributeError, ValueError, TypeError, OverflowError, RuntimeError) as exc:
             raise ValueError(
                 f"Injected 'now' parameter timezone calculation failed: {exc}"
             ) from exc
@@ -122,7 +131,7 @@ def _is_tz_valid(dt: Any) -> bool:
         return False
     try:
         return dt.tzinfo.utcoffset(dt) is not None
-    except Exception:  # noqa: BLE001
+    except (AttributeError, ValueError, TypeError, RuntimeError, OverflowError):
         return False
 
 
@@ -176,7 +185,7 @@ class QualityIssue:
             raise TypeError(f"details must be a Mapping, got {type(self.details).__name__}")
 
         # Deeply freeze nested mappings, lists, and sets to guarantee immutability
-        object.__setattr__(self, "details", _deep_freeze(self.details))
+        object.__setattr__(self, "details", _deep_freeze(self.details, error_prefix="Unsupported mutable or unhandled type in QualityIssue.details"))
 
     def to_dict(self) -> dict[str, Any]:
         """Convert issue to a plain dictionary for serialization without global side effects."""
@@ -198,7 +207,13 @@ class QualityIssue:
         }
 
     def __reduce__(self) -> tuple[Any, ...]:
-        """Support pickle serialization while preserving deep immutability on unpickle."""
+        """Support pickle serialization while preserving deep immutability on unpickle.
+
+        Security Constraint (SEC-02):
+        Pickle serialization is supported ONLY for trusted in-process IPC and testing fixtures.
+        Deserializing untrusted external pickle payloads is strictly prohibited. For external
+        network boundaries, use to_dict() and schema-validated JSON serialization.
+        """
         def _unfreeze(obj: Any) -> Any:
             if isinstance(obj, Mapping):
                 return {k: _unfreeze(v) for k, v in obj.items()}
@@ -284,7 +299,13 @@ class ValidationResult:
         }
 
     def __reduce__(self) -> tuple[Any, ...]:
-        """Support pickle serialization without global side effects."""
+        """Support pickle serialization without global side effects.
+
+        Security Constraint (SEC-02):
+        Pickle serialization is supported ONLY for trusted in-process IPC and testing fixtures.
+        Deserializing untrusted external pickle payloads is strictly prohibited. For external
+        network boundaries, use to_dict() and schema-validated JSON serialization.
+        """
         return (ValidationResult, (self.is_valid, self.issues))
 
 
@@ -581,7 +602,7 @@ def check_timezone_awareness(
 
     try:
         offset = dt.tzinfo.utcoffset(dt)
-    except Exception as exc:  # noqa: BLE001
+    except (AttributeError, ValueError, TypeError, RuntimeError, OverflowError) as exc:
         issues.append(
             QualityIssue(
                 code=DataQualityErrorCode.NAIVE_TIMESTAMP,
@@ -693,7 +714,7 @@ def check_timing_and_provenance(
     # Timing causality with robust exception safety against unstable or flaking tzinfo
     try:
         is_open_ge_close = open_time >= close_time
-    except Exception as exc:  # noqa: BLE001
+    except (AttributeError, ValueError, TypeError, RuntimeError, OverflowError) as exc:
         return [
             QualityIssue(
                 code=DataQualityErrorCode.MALFORMED_CANDLE,
@@ -718,7 +739,7 @@ def check_timing_and_provenance(
 
     try:
         is_retrieval_before_close = retrieval_ts < close_time
-    except Exception as exc:  # noqa: BLE001
+    except (AttributeError, ValueError, TypeError, RuntimeError, OverflowError) as exc:
         issues.append(
             QualityIssue(
                 code=DataQualityErrorCode.MALFORMED_CANDLE,
@@ -751,7 +772,7 @@ def check_timing_and_provenance(
             is_retrieval_after_now = retrieval_ts > now
             is_open_future = open_time > now
             is_in_progress = now < close_time
-        except Exception as exc:  # noqa: BLE001
+        except (AttributeError, ValueError, TypeError, RuntimeError, OverflowError) as exc:
             issues.append(
                 QualityIssue(
                     code=DataQualityErrorCode.MALFORMED_CANDLE,
@@ -819,7 +840,7 @@ def check_timing_and_provenance(
         if max_staleness is not None:
             try:
                 age = now - close_time
-            except Exception as exc:  # noqa: BLE001
+            except (AttributeError, ValueError, TypeError, RuntimeError, OverflowError) as exc:
                 issues.append(
                     QualityIssue(
                         code=DataQualityErrorCode.MALFORMED_CANDLE,
@@ -910,6 +931,211 @@ def check_staleness(
     return issues
 
 
+def check_session_and_grid(
+    candle: Any,
+    session: ExchangeSession | None = None,
+    calendar: ExchangeCalendar | None = None,
+) -> list[QualityIssue]:
+    """Validate interval-grid anchoring, exchange compatibility, and session membership."""
+    issues: list[QualityIssue] = []
+    ts = getattr(candle, "timestamp", None)
+    interval = getattr(candle, "interval", None)
+    symbol = getattr(candle, "symbol", "") if isinstance(getattr(candle, "symbol", None), str) else ""
+    exchange = getattr(candle, "exchange", None)
+
+    if ts is None or not isinstance(ts, datetime) or not _is_tz_valid(ts):
+        return issues
+    if interval is None or not isinstance(interval, CandleInterval):
+        return issues
+
+    # 1. Exchange compatibility check with calendar
+    if calendar is not None and exchange is not None and exchange != calendar.exchange:
+        issues.append(
+            QualityIssue(
+                code=DataQualityErrorCode.EXCHANGE_MISMATCH,
+                message=(
+                    f"Candle exchange '{exchange}' does not match calendar "
+                    f"exchange '{calendar.exchange}'"
+                ),
+                symbol=symbol,
+                timestamp=ts,
+                details={
+                    "candle_exchange": str(exchange),
+                    "calendar_exchange": str(calendar.exchange),
+                },
+            )
+        )
+        return issues
+
+    # 2. Resolve session from calendar or candle exchange
+    if calendar is not None:
+        try:
+            date_val = ts.astimezone(calendar.get_session(ts.date()).timezone).date()
+            session = calendar.get_session(date_val)
+        except (AttributeError, ValueError, TypeError, OverflowError):
+            session = ExchangeSession.for_exchange(calendar.exchange)
+    elif session is None:
+        if exchange is not None:
+            try:
+                session = ExchangeSession.for_exchange(exchange)
+            except (ValueError, TypeError):
+                session = DEFAULT_EXCHANGE_SESSION
+        else:
+            session = DEFAULT_EXCHANGE_SESSION
+
+    # 3. Exchange-session compatibility check
+    if session.exchange is not None and exchange is not None and candle.exchange != session.exchange:
+        issues.append(
+            QualityIssue(
+                code=DataQualityErrorCode.EXCHANGE_MISMATCH,
+                message=(
+                    f"Candle exchange '{candle.exchange}' does not match session "
+                    f"exchange '{session.exchange}'"
+                ),
+                symbol=symbol,
+                timestamp=ts,
+                details={
+                    "candle_exchange": str(candle.exchange),
+                    "session_exchange": str(session.exchange),
+                },
+            )
+        )
+        return issues
+
+    ts_tz = ts.astimezone(session.timezone)
+    candle_date = ts_tz.date()
+
+    # 4. Exchange calendar holiday / non-trading day check (Priority 1)
+    if calendar is not None and calendar.is_populated and not calendar.is_trading_day(candle_date):
+        issues.append(
+            QualityIssue(
+                code=DataQualityErrorCode.OUTSIDE_SESSION,
+                message=(
+                    f"Candle timestamp {ts.isoformat()} falls on declared exchange "
+                    f"holiday/non-trading day ({candle_date}) in {calendar.exchange.value}"
+                ),
+                symbol=symbol,
+                timestamp=ts,
+                details={
+                    "timestamp": ts.isoformat(),
+                    "date": str(candle_date),
+                    "exchange": calendar.exchange.value,
+                    "reason": "declared_holiday",
+                },
+            )
+        )
+        return issues
+
+    # 5. Exchange-session membership: Trading day check (Mon-Fri)
+    if not session.is_trading_day(ts):
+        issues.append(
+            QualityIssue(
+                code=DataQualityErrorCode.OUTSIDE_SESSION,
+                message=(
+                    f"Candle timestamp {ts.isoformat()} falls on non-trading day "
+                    f"(weekday {ts_tz.weekday()} in {session.timezone})"
+                ),
+                symbol=symbol,
+                timestamp=ts,
+                details={
+                    "timestamp": ts.isoformat(),
+                    "weekday": ts_tz.weekday(),
+                    "timezone": str(session.timezone),
+                },
+            )
+        )
+        return issues
+
+    # 4. Daily and higher-timeframe interval validation (M-3)
+    if interval in (CandleInterval.D1, CandleInterval.W1, CandleInterval.MN1):
+        if not session.is_valid_grid_anchor(ts, interval):
+            issues.append(
+                QualityIssue(
+                    code=DataQualityErrorCode.OFF_GRID_TIMESTAMP,
+                    message=(
+                        f"{interval.value} candle timestamp {ts.isoformat()} is not anchored to a "
+                        f"valid grid anchor for {session.exchange or session.name} "
+                        f"(expected session_open {session.session_open} or midnight 00:00:00)"
+                    ),
+                    symbol=symbol,
+                    timestamp=ts,
+                    details={
+                        "timestamp": ts.isoformat(),
+                        "time": str(ts_tz.time()),
+                        "interval": interval.value,
+                        "session_open": str(session.session_open),
+                    },
+                )
+            )
+        return issues
+
+    # 5. Intraday exchange-session membership
+    t = ts_tz.time()
+    if not (session.session_open <= t < session.session_close):
+        issues.append(
+            QualityIssue(
+                code=DataQualityErrorCode.OUTSIDE_SESSION,
+                message=(
+                    f"Intraday candle timestamp {ts.isoformat()} ({t}) is outside regular "
+                    f"trading session [{session.session_open}, {session.session_close}) in {session.timezone}"
+                ),
+                symbol=symbol,
+                timestamp=ts,
+                details={
+                    "timestamp": ts.isoformat(),
+                    "time": str(t),
+                    "session_open": str(session.session_open),
+                    "session_close": str(session.session_close),
+                },
+            )
+        )
+        return issues
+
+    # 6. Intraday interval-grid anchoring
+    if ts_tz.second != 0 or ts_tz.microsecond != 0:
+        issues.append(
+            QualityIssue(
+                code=DataQualityErrorCode.OFF_GRID_TIMESTAMP,
+                message=(
+                    f"Intraday candle timestamp {ts.isoformat()} has non-zero second/microsecond "
+                    f"({ts_tz.second}s, {ts_tz.microsecond}us)"
+                ),
+                symbol=symbol,
+                timestamp=ts,
+                details={
+                    "timestamp": ts.isoformat(),
+                    "second": ts_tz.second,
+                    "microsecond": ts_tz.microsecond,
+                },
+            )
+        )
+        return issues
+
+    elapsed_minutes = (t.hour - session.session_open.hour) * 60 + (t.minute - session.session_open.minute)
+    interval_minutes = int(interval.duration.total_seconds() // 60)
+    if interval_minutes > 0 and (elapsed_minutes % interval_minutes) != 0:
+        issues.append(
+            QualityIssue(
+                code=DataQualityErrorCode.OFF_GRID_TIMESTAMP,
+                message=(
+                    f"Intraday candle at {t} is not aligned with {interval.value} interval grid "
+                    f"(elapsed {elapsed_minutes}m from {session.session_open} not divisible by {interval_minutes}m)"
+                ),
+                symbol=symbol,
+                timestamp=ts,
+                details={
+                    "timestamp": ts.isoformat(),
+                    "time": str(t),
+                    "interval": interval.value,
+                    "elapsed_minutes": elapsed_minutes,
+                    "interval_minutes": interval_minutes,
+                },
+            )
+        )
+
+    return issues
+
+
 def check_duplicate_timestamps(candles: Iterable[Any]) -> list[QualityIssue]:
     """Check for duplicate timestamps, distinguishing identical from conflicting candles.
 
@@ -952,7 +1178,7 @@ def check_duplicate_timestamps(candles: Iterable[Any]) -> list[QualityIssue]:
 
         try:
             utc_time = c.timestamp.astimezone(UTC)
-        except Exception as exc:  # noqa: BLE001
+        except (AttributeError, ValueError, TypeError, RuntimeError, OverflowError) as exc:
             issues.append(
                 QualityIssue(
                     code=DataQualityErrorCode.MALFORMED_CANDLE,
@@ -1074,7 +1300,16 @@ def check_sequence_monotonicity(candles: Iterable[Any]) -> list[QualityIssue]:
         if prev_candle is not None:
             try:
                 is_out_of_order = curr.timestamp < prev_candle.timestamp
-            except Exception as exc:  # noqa: BLE001
+                prev_close = getattr(prev_candle, "close_time", None)
+                if prev_close is None and hasattr(prev_candle, "interval") and isinstance(prev_candle.interval, CandleInterval):
+                    prev_close = prev_candle.timestamp + prev_candle.interval.duration
+                is_overlapping = (
+                    not is_out_of_order
+                    and curr.timestamp > prev_candle.timestamp
+                    and prev_close is not None
+                    and curr.timestamp < prev_close
+                )
+            except (AttributeError, ValueError, TypeError, RuntimeError, OverflowError) as exc:
                 issues.append(
                     QualityIssue(
                         code=DataQualityErrorCode.MALFORMED_CANDLE,
@@ -1107,6 +1342,25 @@ def check_sequence_monotonicity(candles: Iterable[Any]) -> list[QualityIssue]:
                         },
                     )
                 )
+            elif is_overlapping:
+                issues.append(
+                    QualityIssue(
+                        code=DataQualityErrorCode.OVERLAPPING_CANDLE,
+                        message=(
+                            f"Overlapping candle detected at index {i}: open time ({curr.timestamp.isoformat()}) "
+                            f"is prior to previous candle close time ({prev_close.isoformat()}) "
+                            f"at index {prev_valid_idx}"
+                        ),
+                        symbol=getattr(curr, "symbol", ""),
+                        timestamp=curr.timestamp,
+                        details={
+                            "index": i,
+                            "previous_index": prev_valid_idx,
+                            "timestamp": curr.timestamp.isoformat(),
+                            "previous_close_time": prev_close.isoformat(),
+                        },
+                    )
+                )
 
         prev_valid_idx = i
         prev_candle = curr
@@ -1117,23 +1371,43 @@ def check_sequence_monotonicity(candles: Iterable[Any]) -> list[QualityIssue]:
 def check_missing_intervals(
     candles: Iterable[Any],
     expected_interval: CandleInterval | timedelta | None = None,
+    now: datetime | None = None,
+    session: ExchangeSession | None = None,
+    calendar: ExchangeCalendar | None = None,
+    allow_sparse: bool = False,
 ) -> list[QualityIssue]:
     """Check sequence for missing intervals within continuous market trading sessions.
 
-    Uses NSE/BSE regular trading session boundaries (09:15 to 15:30 IST):
-    - Intraday bars: Requires consecutive calendar weekday transition (day_diff == 1)
-      where previous bar closes EXACTLY at 15:30 IST and next bar opens EXACTLY at 09:15 IST.
-    - All multi-day transitions (day_diff > 1, including ordinary Friday-to-Monday weekend
-      and holiday gaps) return MARKET_CALENDAR_REQUIRED because exchange calendar evidence
-      is required to establish whether weekend or holiday trading occurred.
-    - Daily bars: Single-day consecutive weekday transitions (Mon->Tue, etc.) are accepted;
-      multi-day transitions (day_delta > 1, including Friday-to-Monday) return MARKET_CALENDAR_REQUIRED.
-    - Malformed elements emit MALFORMED_CANDLE and do not bridge intervals across corrupt data.
+    Uses exchange session boundaries and optional exchange calendar:
+    - If calendar is provided, weekend and holiday transitions are verified against calendar evidence.
+    - If calendar is omitted, all multi-day transitions fail closed with MARKET_CALENDAR_REQUIRED.
+    - If allow_sparse=True, missing intraday intervals on trading days are permitted for illiquid instruments.
     """
     step: timedelta | None = _validate_expected_interval(expected_interval)
     candles_seq: Sequence[Any] = candles if isinstance(candles, Sequence) else tuple(candles)
     if len(candles_seq) < 2:
         return []
+
+    # Resolve exchange session if omitted
+    if session is None:
+        if calendar is not None:
+            session = ExchangeSession.for_exchange(calendar.exchange)
+        else:
+            first_ex = next(
+                (
+                    getattr(c, "exchange", None)
+                    for c in candles_seq
+                    if c is not None and getattr(c, "exchange", None) is not None
+                ),
+                None,
+            )
+            if first_ex is not None:
+                try:
+                    session = ExchangeSession.for_exchange(first_ex)
+                except (ValueError, TypeError):
+                    session = DEFAULT_EXCHANGE_SESSION
+            else:
+                session = DEFAULT_EXCHANGE_SESSION
 
     issues: list[QualityIssue] = []
     if step is None:
@@ -1191,9 +1465,9 @@ def check_missing_intervals(
 
         if prev is not None:
             try:
-                t_prev = prev.timestamp.astimezone(IST)
-                t_curr = curr.timestamp.astimezone(IST)
-            except Exception as exc:  # noqa: BLE001
+                t_prev = prev.timestamp.astimezone(session.timezone)
+                t_curr = curr.timestamp.astimezone(session.timezone)
+            except (AttributeError, ValueError, TypeError, OverflowError) as exc:
                 issues.append(
                     QualityIssue(
                         code=DataQualityErrorCode.MALFORMED_CANDLE,
@@ -1207,16 +1481,70 @@ def check_missing_intervals(
                 prev = curr
                 continue
 
+            # Priority 1: Reject candle if current date is a declared exchange holiday / non-trading day
+            if calendar is not None and calendar.is_populated and not calendar.is_trading_day(t_curr.date()):
+                issues.append(
+                    QualityIssue(
+                        code=DataQualityErrorCode.OUTSIDE_SESSION,
+                        message=(
+                            f"Candle at index {i} falls on declared exchange holiday/non-trading day "
+                            f"({t_curr.date()}) in {calendar.exchange.value}"
+                        ),
+                        symbol=getattr(curr, "symbol", ""),
+                        timestamp=curr.timestamp,
+                        details={
+                            "index": i,
+                            "date": str(t_curr.date()),
+                            "exchange": calendar.exchange.value,
+                            "reason": "declared_holiday",
+                        },
+                    )
+                )
+
+            has_calendar_evidence = (
+                calendar is not None
+                and calendar.is_populated
+                and calendar.has_evidence_for_range(t_prev.date(), t_curr.date())
+            )
+
             if is_daily:
                 day_delta = (t_curr.date() - t_prev.date()).days
                 prev_wd = t_prev.weekday()
                 curr_wd = t_curr.weekday()
 
-                # Accepted without calendar: strictly single-day consecutive weekday step (delta == 1, Mon-Thu -> next)
-                # Any multi-day jump (including Friday-to-Monday delta == 3 and holiday gaps) requires exchange calendar (M2b)
                 is_valid_weekday_step = (day_delta == 1 and prev_wd < 4 and curr_wd == prev_wd + 1)
+                if is_valid_weekday_step and not has_calendar_evidence:
+                    pass
+                elif has_calendar_evidence:
+                    # Verify intermediate calendar dates
+                    missing_trading_days = []
+                    cur_d = t_prev.date() + timedelta(days=1)
+                    while cur_d < t_curr.date():
+                        if calendar.is_trading_day(cur_d):
+                            missing_trading_days.append(cur_d)
+                        cur_d += timedelta(days=1)
 
-                if not is_valid_weekday_step:
+                    if missing_trading_days:
+                        issues.append(
+                            QualityIssue(
+                                code=DataQualityErrorCode.MISSING_INTERVAL,
+                                message=(
+                                    f"Missing daily trading session(s) detected between {t_prev.date()} and {t_curr.date()}: "
+                                    f"{[str(d) for d in missing_trading_days]} were scheduled trading days per exchange calendar"
+                                ),
+                                symbol=getattr(curr, "symbol", ""),
+                                timestamp=curr.timestamp,
+                                details={
+                                    "start_index": prev_idx,
+                                    "end_index": i,
+                                    "previous_date": str(t_prev.date()),
+                                    "current_date": str(t_curr.date()),
+                                    "missing_trading_days": [str(d) for d in missing_trading_days],
+                                },
+                            )
+                        )
+                else:
+                    # No calendar evidence provided: fail closed
                     is_ordinary_weekend = (day_delta == 3 and prev_wd == 4 and curr_wd == 0)
                     issues.append(
                         QualityIssue(
@@ -1242,12 +1570,12 @@ def check_missing_intervals(
                         )
                     )
             else:
-                # Intraday candles (e.g. 1m, 5m, 15m)
+                # Intraday candles
                 if t_prev.date() == t_curr.date():
                     # Same calendar day
                     try:
                         delta = t_curr - t_prev
-                    except Exception as exc:  # noqa: BLE001
+                    except (AttributeError, ValueError, TypeError, OverflowError) as exc:
                         issues.append(
                             QualityIssue(
                                 code=DataQualityErrorCode.MALFORMED_CANDLE,
@@ -1263,80 +1591,117 @@ def check_missing_intervals(
 
                     if delta > step:
                         missing_bars = round(delta / step) - 1
-                        issues.append(
-                            QualityIssue(
-                                code=DataQualityErrorCode.MISSING_INTERVAL,
-                                message=(
-                                    f"Intraday gap detected between {t_prev.isoformat()} and {t_curr.isoformat()}: "
-                                    f"delta {delta} exceeds interval {step} (~{missing_bars} missing bars)"
-                                ),
-                                symbol=getattr(curr, "symbol", ""),
-                                timestamp=curr.timestamp,
-                                details={
-                                    "start_index": prev_idx,
-                                    "end_index": i,
-                                    "start_timestamp": t_prev.isoformat(),
-                                    "end_timestamp": t_curr.isoformat(),
-                                    "delta_seconds": delta.total_seconds(),
-                                    "step_seconds": step.total_seconds(),
-                                    "estimated_missing_candles": missing_bars,
-                                },
-                            )
-                        )
-                else:
-                    # Crossing calendar date boundary
-                    day_diff = (t_curr.date() - t_prev.date()).days
-                    prev_wd = t_prev.weekday()
-                    curr_wd = t_curr.weekday()
-
-                    # Only consecutive calendar weekdays (day_diff == 1, Mon-Thu) are valid without exchange calendar
-                    # Friday-to-Monday (day_diff == 3) or multi-day holiday gaps cannot be assumed valid without calendar
-                    if day_diff == 1 and prev_wd < 4 and curr_wd == prev_wd + 1:
-                        # Consecutive weekdays: require EXACT session boundaries (close 15:30, open 09:15)
-                        prev_close_time = getattr(
-                            prev, "close_time", prev.timestamp + step
-                        )
-                        curr_open_time = getattr(
-                            curr, "open_time", curr.timestamp
-                        )
-                        try:
-                            prev_close_time = prev_close_time.astimezone(IST)
-                            curr_open_time = curr_open_time.astimezone(IST)
-                        except Exception as exc:  # noqa: BLE001
-                            issues.append(
-                                QualityIssue(
-                                    code=DataQualityErrorCode.MALFORMED_CANDLE,
-                                    message=f"Session boundary timezone conversion failed at index {i}: {exc}",
-                                    symbol=getattr(curr, "symbol", ""),
-                                    timestamp=curr.timestamp,
-                                    details={"index": i, "error": str(exc)},
-                                )
-                            )
-                            prev_idx = i
-                            prev = curr
-                            continue
-
-                        normal_prev_close = (prev_close_time.time() == NSE_SESSION_CLOSE)
-                        normal_curr_open = (curr_open_time.time() == NSE_SESSION_OPEN)
-
-                        if not normal_prev_close or not normal_curr_open:
+                        if not allow_sparse:
                             issues.append(
                                 QualityIssue(
                                     code=DataQualityErrorCode.MISSING_INTERVAL,
                                     message=(
-                                        f"Gap around session transition between {t_prev.isoformat()} and {t_curr.isoformat()}: "
-                                        f"previous bar closed at {prev_close_time.time()} (expected exact {NSE_SESSION_CLOSE}) or "
-                                        f"current bar opened at {curr_open_time.time()} (expected exact {NSE_SESSION_OPEN})"
+                                        f"Intraday gap detected between {t_prev.isoformat()} and {t_curr.isoformat()}: "
+                                        f"delta {delta} exceeds interval {step} (~{missing_bars} missing bars)"
                                     ),
                                     symbol=getattr(curr, "symbol", ""),
                                     timestamp=curr.timestamp,
                                     details={
                                         "start_index": prev_idx,
                                         "end_index": i,
-                                        "previous_close_time": str(prev_close_time.time()),
-                                        "current_open_time": str(curr_open_time.time()),
-                                        "expected_session_open": str(NSE_SESSION_OPEN),
-                                        "expected_session_close": str(NSE_SESSION_CLOSE),
+                                        "start_timestamp": t_prev.isoformat(),
+                                        "end_timestamp": t_curr.isoformat(),
+                                        "delta_seconds": delta.total_seconds(),
+                                        "step_seconds": step.total_seconds(),
+                                        "estimated_missing_candles": missing_bars,
+                                    },
+                                )
+                            )
+                else:
+                    # Crossing calendar date boundary
+                    day_diff = (t_curr.date() - t_prev.date()).days
+                    prev_wd = t_prev.weekday()
+                    curr_wd = t_curr.weekday()
+
+                    prev_close_time = getattr(
+                        prev, "close_time", prev.timestamp + step
+                    )
+                    curr_open_time = getattr(
+                        curr, "open_time", curr.timestamp
+                    )
+                    try:
+                        prev_close_time = prev_close_time.astimezone(session.timezone)
+                        curr_open_time = curr_open_time.astimezone(session.timezone)
+                    except (AttributeError, ValueError, TypeError, OverflowError) as exc:
+                        issues.append(
+                            QualityIssue(
+                                code=DataQualityErrorCode.MALFORMED_CANDLE,
+                                message=f"Session boundary timezone conversion failed at index {i}: {exc}",
+                                symbol=getattr(curr, "symbol", ""),
+                                timestamp=curr.timestamp,
+                                details={"index": i, "error": str(exc)},
+                            )
+                        )
+                        prev_idx = i
+                        prev = curr
+                        continue
+
+                    prev_session = calendar.get_session(t_prev.date()) if calendar else session
+                    curr_session = calendar.get_session(t_curr.date()) if calendar else session
+
+                    normal_prev_close = prev_session.is_valid_session_close(prev_close_time, step)
+                    normal_curr_open = (curr_open_time.time() == curr_session.session_open)
+
+                    if not normal_prev_close or not normal_curr_open:
+                        issues.append(
+                            QualityIssue(
+                                code=DataQualityErrorCode.MISSING_INTERVAL,
+                                message=(
+                                    f"Gap around session transition between {t_prev.isoformat()} and {t_curr.isoformat()}: "
+                                    f"previous bar closed at {prev_close_time.time()} (expected valid session close) or "
+                                    f"current bar opened at {curr_open_time.time()} (expected exact {curr_session.session_open})"
+                                ),
+                                symbol=getattr(curr, "symbol", ""),
+                                timestamp=curr.timestamp,
+                                details={
+                                    "start_index": prev_idx,
+                                    "end_index": i,
+                                    "previous_close_time": str(prev_close_time.time()),
+                                    "current_open_time": str(curr_open_time.time()),
+                                    "expected_session_open": str(curr_session.session_open),
+                                    "expected_session_close": str(prev_session.session_close),
+                                },
+                            )
+                        )
+
+                    has_calendar_evidence = (
+                        calendar is not None
+                        and calendar.is_populated
+                        and calendar.has_evidence_for_range(t_prev.date(), t_curr.date())
+                    )
+                    is_consecutive_weekday = (day_diff == 1 and prev_wd < 4 and curr_wd == prev_wd + 1)
+                    if is_consecutive_weekday and not has_calendar_evidence:
+                        pass
+                    elif has_calendar_evidence:
+                        # Verify intermediate calendar dates
+                        missing_trading_days = []
+                        cur_d = t_prev.date() + timedelta(days=1)
+                        while cur_d < t_curr.date():
+                            if calendar.is_trading_day(cur_d):
+                                missing_trading_days.append(cur_d)
+                            cur_d += timedelta(days=1)
+
+                        if missing_trading_days:
+                            issues.append(
+                                QualityIssue(
+                                    code=DataQualityErrorCode.MISSING_INTERVAL,
+                                    message=(
+                                        f"Missing trading day(s) detected between {t_prev.date()} and {t_curr.date()}: "
+                                        f"{[str(d) for d in missing_trading_days]} were scheduled trading days per exchange calendar"
+                                    ),
+                                    symbol=getattr(curr, "symbol", ""),
+                                    timestamp=curr.timestamp,
+                                    details={
+                                        "start_index": prev_idx,
+                                        "end_index": i,
+                                        "previous_date": str(t_prev.date()),
+                                        "current_date": str(t_curr.date()),
+                                        "missing_trading_days": [str(d) for d in missing_trading_days],
                                     },
                                 )
                             )
@@ -1373,13 +1738,26 @@ def check_missing_intervals(
 def check_sequence_integrity(
     candles: Iterable[Any],
     expected_interval: CandleInterval | timedelta | None = None,
+    now: datetime | None = None,
+    session: ExchangeSession | None = None,
+    calendar: ExchangeCalendar | None = None,
+    allow_sparse: bool = False,
 ) -> list[QualityIssue]:
     """Validate sequence for duplicate timestamps, monotonicity, and missing intervals."""
     candles_seq: Sequence[Any] = candles if isinstance(candles, Sequence) else tuple(candles)
     issues: list[QualityIssue] = []
     issues.extend(check_duplicate_timestamps(candles_seq))
     issues.extend(check_sequence_monotonicity(candles_seq))
-    issues.extend(check_missing_intervals(candles_seq, expected_interval=expected_interval))
+    issues.extend(
+        check_missing_intervals(
+            candles_seq,
+            expected_interval=expected_interval,
+            now=now,
+            session=session,
+            calendar=calendar,
+            allow_sparse=allow_sparse,
+        )
+    )
     return issues
 
 
@@ -1473,6 +1851,8 @@ def validate_candle(
     candle: Any,
     now: datetime | None = None,
     max_staleness: timedelta | None = None,
+    session: ExchangeSession | None = None,
+    calendar: ExchangeCalendar | None = None,
 ) -> ValidationResult:
     """Validate a single candle against all individual bar quality rules.
 
@@ -1518,10 +1898,10 @@ def validate_candle(
     # 3. Numeric price checks
     o = getattr(candle, "open", None)
     h = getattr(candle, "high", None)
-    l = getattr(candle, "low", None)
+    low_val = getattr(candle, "low", None)
     c = getattr(candle, "close", None)
 
-    for field_name, p in [("open", o), ("high", h), ("low", l), ("close", c)]:
+    for field_name, p in [("open", o), ("high", h), ("low", low_val), ("close", c)]:
         if p is not None:
             if isinstance(p, bool) or not isinstance(p, Decimal):
                 issues.append(
@@ -1546,11 +1926,11 @@ def validate_candle(
 
     # 4. Positive OHLC and OHLC relationships (only if all 4 prices are valid finite Decimals)
     if (
-        all(isinstance(p, Decimal) and p.is_finite() for p in (o, h, l, c))
-        and not any(isinstance(p, bool) for p in (o, h, l, c))
+        all(isinstance(p, Decimal) and p.is_finite() for p in (o, h, low_val, c))
+        and not any(isinstance(p, bool) for p in (o, h, low_val, c))
     ):
-        issues.extend(check_price_positivity(o, h, l, c, symbol, ts if isinstance(ts, datetime) else None))
-        issues.extend(check_ohlc_relationships(o, h, l, c, symbol, ts if isinstance(ts, datetime) else None))
+        issues.extend(check_price_positivity(o, h, low_val, c, symbol, ts if isinstance(ts, datetime) else None))
+        issues.extend(check_ohlc_relationships(o, h, low_val, c, symbol, ts if isinstance(ts, datetime) else None))
 
     # 5. Non-negative volume
     vol = getattr(candle, "volume", None)
@@ -1576,6 +1956,10 @@ def validate_candle(
             continue
         issues.append(t_issue)
 
+    # 7. Exchange session membership, grid anchoring, and exchange compatibility
+    session_issues = check_session_and_grid(candle, session=session, calendar=calendar)
+    issues.extend(session_issues)
+
     return ValidationResult(is_valid=(len(issues) == 0), issues=tuple(issues))
 
 
@@ -1586,6 +1970,10 @@ def validate_candle_sequence(
     expected_interval: CandleInterval | timedelta | None = None,
     allow_empty: bool = False,
     check_gaps: bool = True,
+    check_staleness: bool = True,
+    session: ExchangeSession | None = None,
+    calendar: ExchangeCalendar | None = None,
+    allow_sparse: bool = False,
 ) -> ValidationResult:
     """Validate an ordered series of candles for an equity instrument.
 
@@ -1596,6 +1984,7 @@ def validate_candle_sequence(
     - Sequence consistency (symbol, exchange, interval) across valid candles.
     - Complete identity in duplicate detection (symbol, exchange, interval, UTC timestamp).
     - Session-aware intraday gap detection without false positives for overnight/weekends.
+    - Calendar evidence verification for multi-day transitions.
     - Freshness check on latest completed bar.
     """
     _validate_now_and_staleness(now, max_staleness)
@@ -1613,11 +2002,35 @@ def validate_candle_sequence(
         )
         return ValidationResult(is_valid=False, issues=(issue,))
 
+    # Resolve exchange session if omitted
+    resolved_session: ExchangeSession
+    if session is not None:
+        resolved_session = session
+    elif calendar is not None:
+        resolved_session = ExchangeSession.for_exchange(calendar.exchange)
+    else:
+        first_ex = next(
+            (
+                getattr(c, "exchange", None)
+                for c in candles_tuple
+                if c is not None and getattr(c, "exchange", None) is not None
+            ),
+            None,
+        )
+        if first_ex is not None:
+            try:
+                resolved_session = ExchangeSession.for_exchange(first_ex)
+            except (ValueError, TypeError):
+                resolved_session = DEFAULT_EXCHANGE_SESSION
+        else:
+            resolved_session = DEFAULT_EXCHANGE_SESSION
+
     all_issues: list[QualityIssue] = []
 
     # Validate each candle individually, recording original sequence index
+    # Passes now=now with max_staleness=None to enforce future timestamp rejections across all candles
     for i, c in enumerate(candles_tuple):
-        candle_result = validate_candle(c, now=None)
+        candle_result = validate_candle(c, now=now, max_staleness=None, session=resolved_session, calendar=calendar)
         for issue in candle_result.issues:
             details_dict = dict(issue.details)
             details_dict["index"] = i
@@ -1631,8 +2044,7 @@ def validate_candle_sequence(
                 )
             )
 
-    # Sequence consistency (symbol, exchange, interval) preserving indices
-        # Deduplicated issue aggregation preserving issue uniqueness and original indices
+    # Deduplicated issue aggregation preserving issue uniqueness and original indices
     def _add_unique(issues_to_add: list[QualityIssue]) -> None:
         existing_keys = {
             (
@@ -1657,7 +2069,7 @@ def validate_candle_sequence(
     # Sequence consistency (symbol, exchange, interval) preserving indices
     _add_unique(check_sequence_consistency(candles_tuple))
 
-    # Integrity: duplicates (with complete identity), monotonicity, session-aware gaps
+    # Integrity: duplicates (with complete identity), monotonicity (with overlap detection), session-aware gaps
     # check_gaps=False suppresses missing-interval detection; duplicates and monotonicity still run.
     if check_gaps:
         # Resolve gap-checking interval: caller-supplied or inferred from first valid candle.
@@ -1672,7 +2084,16 @@ def validate_candle_sequence(
             )
             if first_valid is not None:
                 inferred_step = first_valid.interval
-        _add_unique(check_sequence_integrity(candles_tuple, expected_interval=inferred_step))
+        _add_unique(
+            check_sequence_integrity(
+                candles_tuple,
+                expected_interval=inferred_step,
+                now=now,
+                session=resolved_session,
+                calendar=calendar,
+                allow_sparse=allow_sparse,
+            )
+        )
     else:
         # Gap detection disabled: run only duplicate and monotonicity checks.
         _add_unique(check_duplicate_timestamps(candles_tuple))
@@ -1684,7 +2105,8 @@ def validate_candle_sequence(
             last_valid_entry = c
             break
 
-    if now is not None and last_valid_entry is not None:
+    # Sequence-level staleness validation on latest completed bar (only when check_staleness is enabled)
+    if now is not None and check_staleness and last_valid_entry is not None:
         staleness_limit = max_staleness
         if staleness_limit is None and hasattr(last_valid_entry, "interval") and isinstance(last_valid_entry.interval, CandleInterval):
             staleness_limit = last_valid_entry.interval.duration * 3

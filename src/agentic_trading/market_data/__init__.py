@@ -1,15 +1,44 @@
 """Market data foundation for Indian equities (NSE/BSE).
 
-Provides canonical data models, strict quality gates, and deterministic
-data validation mechanisms.
+Provides canonical data models, strict quality gates, deterministic
+data validation mechanisms, and provider ingestion interfaces.
 """
 from __future__ import annotations
 
+from agentic_trading.market_data.adapters import (
+    ProviderAdapter,
+    RawDataValidationError,
+    StandardDictAdapter,
+)
+from agentic_trading.market_data.ingestion import (
+    CoverageStatus,
+    FreshnessPolicy,
+    IngestionResult,
+    MarketCalendarRequiredError,
+    MarketDataIngestionPipeline,
+    SequenceIngestionResult,
+    UnsupportedIntervalFreshnessError,
+)
 from agentic_trading.market_data.models import (
+    DEFAULT_EXCHANGE_SESSION,
     IST,
+    US_EASTERN,
     Candle,
     CandleInterval,
     Exchange,
+    ExchangeCalendar,
+    ExchangeSession,
+    get_exchange_timezone,
+)
+from agentic_trading.market_data.provider import (
+    HistoricalDataRequest,
+    MarketDataProvider,
+    ProviderConnectionError,
+    ProviderError,
+    ProviderPayloadError,
+    ProviderResponse,
+    ProviderTimeoutError,
+    SyntheticMarketDataProvider,
 )
 from agentic_trading.market_data.quality import (
     DataQualityErrorCode,
@@ -32,12 +61,34 @@ from agentic_trading.market_data.quality import (
 )
 
 __all__ = [
+    "DEFAULT_EXCHANGE_SESSION",
     "IST",
+    "US_EASTERN",
     "Candle",
     "CandleInterval",
+    "CoverageStatus",
     "DataQualityErrorCode",
     "Exchange",
+    "ExchangeCalendar",
+    "ExchangeSession",
+    "FreshnessPolicy",
+    "HistoricalDataRequest",
+    "IngestionResult",
+    "MarketCalendarRequiredError",
+    "MarketDataIngestionPipeline",
+    "MarketDataProvider",
+    "ProviderAdapter",
+    "ProviderConnectionError",
+    "ProviderError",
+    "ProviderPayloadError",
+    "ProviderResponse",
+    "ProviderTimeoutError",
     "QualityIssue",
+    "RawDataValidationError",
+    "SequenceIngestionResult",
+    "StandardDictAdapter",
+    "SyntheticMarketDataProvider",
+    "UnsupportedIntervalFreshnessError",
     "ValidationResult",
     "check_candle_structure",
     "check_duplicate_timestamps",
@@ -51,6 +102,7 @@ __all__ = [
     "check_timezone_awareness",
     "check_timing_and_provenance",
     "check_volume",
+    "get_exchange_timezone",
     "validate_candle",
     "validate_candle_sequence",
 ]
