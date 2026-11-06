@@ -492,6 +492,8 @@ class ExchangeCalendar:
         """Return True if d is verified with calendar evidence as a non-trading day (holiday or standard weekend)."""
         if d in self.holidays:
             return True
+        if not self.has_evidence_for_date(d):
+            return False
         if d.weekday() >= 5 and d not in self.special_sessions:
             return True
         return False

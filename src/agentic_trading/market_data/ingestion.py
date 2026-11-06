@@ -1074,6 +1074,18 @@ class MarketDataIngestionPipeline:
 
         candles_tuple = tuple(candles_list)
 
+        if calendar is not None and calendar.is_populated and not calendar.has_evidence_for_range(
+            request.start_time.date(), request.end_time.date()
+        ):
+            return SequenceIngestionResult(
+                success=False,
+                error_message="Market calendar does not provide complete evidence for the requested window",
+                error_code="MARKET_CALENDAR_REQUIRED",
+                raw_record_count=len(resp.records),
+                retrieval_timestamp=resp.retrieval_timestamp,
+                coverage_status=CoverageStatus.MARKET_CALENDAR_REQUIRED.value,
+            )
+
         # Resolve session from calendar or exchange
         resolved_session: ExchangeSession
         if calendar is not None:
