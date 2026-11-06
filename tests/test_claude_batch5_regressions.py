@@ -25,9 +25,7 @@ from unittest.mock import MagicMock, patch
 import agentic_trading.zerodha_connector as zc
 import pytest
 from agentic_trading.zerodha_connector import (
-    _READ_ONLY_ALLOWLIST,
     ZerodhaReadOnlyConnector,
-    _ReadOnlyKiteWrapper,
 )
 
 from agentic_trading.market_data.ingestion import (

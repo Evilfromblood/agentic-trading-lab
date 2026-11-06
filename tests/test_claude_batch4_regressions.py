@@ -535,7 +535,7 @@ def test_h1_all_twenty_allowlisted_methods_callable_and_safe() -> None:
     assert wrapper.mf_holdings() == {"mf_holdings": "success"}
     assert wrapper.get_gtts() == {"get_gtts": "success"}
     assert wrapper.get_gtt(123) == {"get_gtt": "success"}
-    assert wrapper.generate_session("token", api_secret="secret") == {"access_token": "mock_token"}
+    assert wrapper.generate_session("token", api_secret="secret") == {"access_token": "mock_token"}  # pragma: allowlist secret
     assert wrapper.set_access_token("token") is None
     assert wrapper.invalidate_access_token("token") is None
     assert wrapper.login_url() == "https://kite.zerodha.com/connect/login"
@@ -559,7 +559,7 @@ def test_h1_connector_read_methods_with_session() -> None:
             assert connector.margins() == {"margins": "success"}
 
             # complete_login
-            os.environ["KITE_API_SECRET"] = "mock_secret"
+            os.environ["KITE_API_SECRET"] = "mock_secret"  # pragma: allowlist secret
             login_res = connector.complete_login("mock_request_token")
             assert "login_time" in login_res
 

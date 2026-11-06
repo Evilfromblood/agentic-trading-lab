@@ -1279,16 +1279,12 @@ class MarketDataIngestionPipeline:
             if has_exchange_mismatch:
                 reasons.append("exchange mismatch detected")
             reason_str = " and ".join(reasons)
-            err_code = (
-                "MARKET_CALENDAR_REQUIRED"
-                if (has_calendar_required and not is_boundary_truncated and not has_missing_interval and not has_exchange_mismatch and not skipped_weekday)
-                else "TRUNCATED_COVERAGE"
-            )
-            failure_coverage = (
-                CoverageStatus.TRUNCATED_COVERAGE.value
-                if coverage_status == CoverageStatus.FULL_COVERAGE.value
-                else coverage_status
-            )
+            if (has_calendar_required and not is_boundary_truncated and not has_missing_interval and not has_exchange_mismatch and not skipped_weekday):
+                err_code = "MARKET_CALENDAR_REQUIRED"
+                failure_coverage = CoverageStatus.MARKET_CALENDAR_REQUIRED.value
+            else:
+                err_code = "TRUNCATED_COVERAGE"
+                failure_coverage = CoverageStatus.TRUNCATED_COVERAGE.value
             return SequenceIngestionResult(
                 success=False,
                 candles=(),

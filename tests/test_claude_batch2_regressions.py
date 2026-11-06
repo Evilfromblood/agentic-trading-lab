@@ -633,7 +633,7 @@ def test_priority6_zerodha_connector_order_placement_blocked() -> None:
     if "kiteconnect" not in sys.modules:
         sys.modules["kiteconnect"] = MagicMock()
 
-    os.environ["KITE_API_KEY"] = "mock_key"
+    os.environ["KITE_API_KEY"] = "mock_key"  # pragma: allowlist secret
     try:
         from agentic_trading.zerodha_connector import ZerodhaReadOnlyConnector
 

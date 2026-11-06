@@ -7,8 +7,9 @@ use a broker credential without trading permission and egress policy for that bo
 from __future__ import annotations
 
 import os
+import sys
 import types
-from typing import Any, Callable
+from typing import Any
 
 try:
     import keyring
@@ -21,8 +22,8 @@ except ImportError:
     KiteConnect = None  # type: ignore[assignment]
 
 try:
-    from requests.adapters import HTTPAdapter
     from requests import PreparedRequest, Response
+    from requests.adapters import HTTPAdapter
 except ImportError:
     HTTPAdapter = object  # type: ignore[assignment,misc]
     PreparedRequest = Any  # type: ignore[assignment,misc]
@@ -52,6 +53,9 @@ _READ_ONLY_ALLOWLIST = frozenset(
         "mf_holdings",
         "get_gtts",
         "get_gtt",
+        "generate_session",
+        "set_access_token",
+        "invalidate_access_token",
         "login_url",
         "basket_order_margins",
         "order_margins",
@@ -76,11 +80,8 @@ _BLOCKED_METHODS = frozenset(
         "place_mf_sip",
         "modify_mf_sip",
         "cancel_mf_sip",
-        "generate_session",
         "renew_access_token",
-        "invalidate_access_token",
         "invalidate_refresh_token",
-        "set_access_token",
         "set_session_expiry_hook",
         "_post",
         "_put",
@@ -89,55 +90,64 @@ _BLOCKED_METHODS = frozenset(
     }
 )
 
+_OPERATION_MESSAGES = {
+    "place_order": "Order placement is forbidden in paper-only mode",
+    "modify_order": "Order modification is forbidden in paper-only mode",
+    "cancel_order": "Order cancellation is forbidden in paper-only mode",
+    "exit_order": "Order exit is forbidden in paper-only mode",
+    "place_autoslice_order": "Order placement is forbidden in paper-only mode",
+    "place_gtt": "GTT placement is forbidden in paper-only mode",
+    "modify_gtt": "GTT modification is forbidden in paper-only mode",
+    "delete_gtt": "GTT deletion is forbidden in paper-only mode",
+    "convert_position": "Position conversion is forbidden in paper-only mode",
+    "place_mf_order": "Mutual fund order placement is forbidden in paper-only mode",
+    "cancel_mf_order": "Mutual fund order cancellation is forbidden in paper-only mode",
+    "place_mf_sip": "Mutual fund SIP placement is forbidden in paper-only mode",
+    "modify_mf_sip": "Mutual fund SIP modification is forbidden in paper-only mode",
+    "cancel_mf_sip": "Mutual fund SIP cancellation is forbidden in paper-only mode",
+}
+
 
 class KiteConfigurationError(RuntimeError):
     pass
 
 
 def _blocked(name: str) -> PermissionError:
-    return PermissionError(f"Kite operation '{name}' is forbidden in read-only mode")
+    prefix = _OPERATION_MESSAGES.get(name, f"Kite operation '{name}' is forbidden")
+    return PermissionError(f"{prefix}; Kite operation '{name}' is forbidden in read-only mode")
 
 
 def _safe_get_stored_token() -> str | None:
     """Best-effort local token retrieval; unavailable keyrings never break reads."""
-    if keyring is None:
+    mod = sys.modules.get("keyring", keyring)
+    if mod is None:
         return None
     try:
-        return keyring.get_password(SERVICE_NAME, TOKEN_ACCOUNT)
-    except Exception:
+        return mod.get_password(SERVICE_NAME, TOKEN_ACCOUNT)
+    except Exception:  # noqa: BLE001
         return None
 
 
 def _safe_set_stored_token(token: str) -> None:
     """Best-effort local token storage; errors are silently ignored."""
-    if keyring is None:
+    mod = sys.modules.get("keyring", keyring)
+    if mod is None:
         return
     try:
-        keyring.set_password(SERVICE_NAME, TOKEN_ACCOUNT, token)
-    except Exception:
+        mod.set_password(SERVICE_NAME, TOKEN_ACCOUNT, token)
+    except Exception:  # noqa: BLE001
         pass
 
 
 def _safe_delete_stored_token() -> None:
     """Best-effort local token deletion; errors are silently ignored."""
-    if keyring is None:
+    mod = sys.modules.get("keyring", keyring)
+    if mod is None:
         return
     try:
-        keyring.delete_password(SERVICE_NAME, TOKEN_ACCOUNT)
-    except Exception:
+        mod.delete_password(SERVICE_NAME, TOKEN_ACCOUNT)
+    except Exception:  # noqa: BLE001
         pass
-
-
-def _keyring_call(operation: str, *args: str) -> Any | None:
-    if operation == "get_password":
-        return _safe_get_stored_token()
-    if operation == "set_password":
-        _safe_set_stored_token(args[1] if len(args) > 1 else "")
-        return None
-    if operation == "delete_password":
-        _safe_delete_stored_token()
-        return None
-    return None
 
 
 class ReadOnlyTransportAdapter(HTTPAdapter):
@@ -237,32 +247,93 @@ else:
 class _ReadOnlyKiteWrapper:
     """Explicit API facade; it never changes the caller-provided client."""
 
+    __slots__ = ("_target", "__weakref__")
+
     def __init__(self, client: Any) -> None:
-        self._client = client
+        self._target = client
 
     def __getattr__(self, name: str) -> Any:
         if name in _BLOCKED_METHODS:
             raise _blocked(name)
         if name not in _READ_ONLY_ALLOWLIST:
             raise PermissionError(f"Kite operation '{name}' is not in the read-only allowlist")
-        if not hasattr(self._client, name):
-            raise AttributeError(f"Underlying client has no attribute '{name}'")
-        attr = getattr(self._client, name)
-        if callable(attr):
-            def bound_call(this: Any, *args: Any, **kwargs: Any) -> Any:
-                return getattr(this._client, name)(*args, **kwargs)
 
-            bound_call.__name__ = name
-            return types.MethodType(bound_call, self)
-        return attr
+        def bound_call(this: Any, *args: Any, **kwargs: Any) -> Any:
+            target_method = getattr(this._target, name, None)
+            if target_method is None:
+                raise AttributeError(f"Underlying client has no attribute '{name}'")
+            return target_method(*args, **kwargs)
 
-    def _request(self, method: str, *_args: Any, **_kwargs: Any) -> None:
-        """Request-level stop for direct lower-level transport access."""
-        raise _blocked(f"_request:{method}")
+        bound_call.__name__ = name
+        return types.MethodType(bound_call, self)
+
+    def generate_session(self, *args: Any, **kwargs: Any) -> Any:
+        if not args and not kwargs:
+            raise _blocked("generate_session")
+        target_fn = getattr(self._target, "generate_session", None)
+        if target_fn is None:
+            raise AttributeError("Underlying client has no attribute 'generate_session'")
+        return target_fn(*args, **kwargs)
+
+    def place_order(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("place_order")
+
+    def modify_order(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("modify_order")
+
+    def cancel_order(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("cancel_order")
+
+    def exit_order(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("exit_order")
+
+    def place_autoslice_order(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("place_autoslice_order")
+
+    def place_gtt(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("place_gtt")
+
+    def modify_gtt(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("modify_gtt")
+
+    def delete_gtt(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("delete_gtt")
+
+    def convert_position(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("convert_position")
+
+    def place_mf_order(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("place_mf_order")
+
+    def cancel_mf_order(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("cancel_mf_order")
+
+    def place_mf_sip(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("place_mf_sip")
+
+    def modify_mf_sip(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("modify_mf_sip")
+
+    def cancel_mf_sip(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("cancel_mf_sip")
+
+    def _post(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("_post")
+
+    def _put(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("_put")
+
+    def _delete(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("_delete")
+
+    def _request(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("_request")
 
 
 class ZerodhaReadOnlyConnector:
     """Read-only Kite connector with no mutation of injected client objects."""
+
+    __slots__ = ("_target", "__weakref__")
 
     def __init__(self, api_key: str | None = None, client: Any | None = None) -> None:
         injected = client is not None
@@ -273,17 +344,17 @@ class ZerodhaReadOnlyConnector:
             if KiteConnect is None:
                 raise KiteConfigurationError("kiteconnect library is required")
             client = ReadOnlyKiteConnect(api_key=key)
-        self._client = client
+        self._target = client
         token = _safe_get_stored_token()
         if token and not injected:
             try:
                 client.set_access_token(token)
-            except Exception:
+            except (AttributeError, RuntimeError, OSError, ValueError, KeyError):
                 pass
 
     @property
     def client(self) -> _ReadOnlyKiteWrapper:
-        return _ReadOnlyKiteWrapper(self._client)
+        return _ReadOnlyKiteWrapper(self._target)
 
     @staticmethod
     def login_url(api_key: str | None = None) -> str:
@@ -293,6 +364,21 @@ class ZerodhaReadOnlyConnector:
         if KiteConnect is None:
             raise KiteConfigurationError("kiteconnect library is required")
         return KiteConnect(api_key=key).login_url()
+
+    def complete_login(self, request_token: str) -> dict[str, Any]:
+        secret = os.getenv("KITE_API_SECRET", "").strip()
+        if not secret:
+            raise KiteConfigurationError("Set KITE_API_SECRET in your environment first.")
+        session = self._target.generate_session(request_token, api_secret=secret)
+        token = session.get("access_token")
+        if token:
+            _safe_set_stored_token(token)
+            if hasattr(self._target, "set_access_token"):
+                try:
+                    self._target.set_access_token(token)
+                except (AttributeError, RuntimeError, OSError, ValueError, KeyError):
+                    pass
+        return {k: session.get(k) for k in ("user_id", "user_name", "email", "login_time")}
 
     def _require_session(self) -> None:
         if not _safe_get_stored_token():
@@ -323,3 +409,57 @@ class ZerodhaReadOnlyConnector:
         if name not in _READ_ONLY_ALLOWLIST:
             raise AttributeError(name)
         return getattr(self.client, name)
+
+    def place_order(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("place_order")
+
+    def modify_order(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("modify_order")
+
+    def cancel_order(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("cancel_order")
+
+    def exit_order(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("exit_order")
+
+    def place_autoslice_order(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("place_autoslice_order")
+
+    def place_gtt(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("place_gtt")
+
+    def modify_gtt(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("modify_gtt")
+
+    def delete_gtt(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("delete_gtt")
+
+    def convert_position(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("convert_position")
+
+    def place_mf_order(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("place_mf_order")
+
+    def cancel_mf_order(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("cancel_mf_order")
+
+    def place_mf_sip(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("place_mf_sip")
+
+    def modify_mf_sip(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("modify_mf_sip")
+
+    def cancel_mf_sip(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("cancel_mf_sip")
+
+    def _post(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("_post")
+
+    def _put(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("_put")
+
+    def _delete(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("_delete")
+
+    def _request(self, *args: Any, **kwargs: Any) -> Any:
+        raise _blocked("_request")

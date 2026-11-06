@@ -438,11 +438,10 @@ class ExchangeCalendar:
             return False
         if d in self.special_sessions or d in self.holidays:
             return True
-        if d.weekday() >= 5:
-            # Standard weekend is covered by exchange calendar unless special session
-            return True
         if self.trading_days is not None:
-            return d in self.trading_days
+            return d in self.trading_days or (
+                d.weekday() >= 5 and min(self.trading_days) <= d <= max(self.trading_days)
+            )
         if self.complete and self.coverage_start is not None and self.coverage_end is not None:
             return self.coverage_start <= d <= self.coverage_end
         return False

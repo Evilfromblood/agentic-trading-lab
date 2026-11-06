@@ -47,6 +47,6 @@ jobs:
           python -m pip_audit
 
       - name: Secret scanning
-        run: |
+        run: | # pragma: allowlist secret
           python -m pip install detect-secrets==1.5.0
           git ls-files -z | xargs -0 detect-secrets-hook --baseline .secrets.baseline
