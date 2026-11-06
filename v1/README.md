@@ -1,7 +1,9 @@
-# Version 1 — US-market prototype
+# Version 1 — US-market prototype (documentation snapshot)
 
-Initial multi-agent equity research committee for AAPL, GOOGL and AMZN. Uses OpenAI-compatible model calls, Yahoo Finance daily history and a local paper-trading ledger.
+This folder currently contains this historical version note only. The runnable v1 source code is not included in the current repository snapshot.
 
-Paper trading only. Long-only; no leverage or shorting. Default risk controls include 0.70 minimum confidence, 80% annualized-volatility ceiling and 5% cash allocation per new position.
+The original concept was a multi-agent equity research committee for AAPL, GOOGL, and AMZN, using an OpenAI-compatible model interface, Yahoo Finance historical data, and a local paper-trading ledger.
 
-See the original v1 project archive previously generated in this chat for the complete source snapshot.
+The earlier design notes described long-only paper trading and example risk thresholds. Those notes are historical design context, not verified or supported behaviour in this repository.
+
+No live trading capability is provided. See the root README for project status and limitations.
