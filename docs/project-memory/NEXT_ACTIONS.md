@@ -1,6 +1,6 @@
 # Next Actions
 
-Current priority: Independent audit verification of M2b Remediation Batch 6.
+Current priority: finish M2b remediation and independent verification. The first major product milestone after the reliable cross-market data foundation is Time Machine.
 
 ## Immediate sequence
 1. Baseline M2a committed (`1b7e582`) and pushed to `origin/feature/reliable-foundation`.
@@ -10,14 +10,25 @@ Current priority: Independent audit verification of M2b Remediation Batch 6.
    - Priority 3 (F3-A, F3-B: Secret Scanning Hardening): Anchored exclusion regex `^(?:\.git/|\.venv(?:311)?/|\.ruff_cache/|\.pytest_cache/|\.coverage$|htmlcov/|m2a-review\.patch$)` strictly avoids masking `.github/` or `.gitlab-ci.yml`. Pin `detect-secrets==1.5.0` in CI with `.secrets.baseline` containing version 1.5.0 and zero unbaselined secrets. Verified detection of dummy AWS secrets across `.github/workflows/leak.yml`, `.github/leak.txt`, `.gitlab-ci.yml`, `src/leak.py`, `.env`, and nested ZIP files.
    - Priority 4 (T-1: Genuine Dependency Verification & Test Coverage): Genuine `kiteconnect==5.2.2`, `keyring==25.7.0`, `requests==2.34.2`, `pytest-cov`, and `ruff` verified in Python 3.11 (`.venv311`) and Python 3.14 (`.venv`). Verified genuine KiteConnect integration with intercepted transport in `tests/test_zerodha_kiteconnect_integration.py` and `tests/test_claude_batch6_regressions.py`. All 310 tests pass across the entire suite with 85.49% test coverage on both Python 3.11.9 and Python 3.14.4.
 3. Package verified audit bundle ZIP `m2b-remediated-batch6-bundle.zip` in parent directory `C:\Users\Rhyth\Downloads\agentic-trading-lab-main\` and compute its SHA-256.
-4. Next M2b increments (awaiting M2b sign-off before proceeding):
-   - Production exchange calendar integration with automated feed ingestion.
-   - Corporate actions and dividend/split price adjustments.
-   - Stored replay fixture subsystem.
+4. Close M2b only when independent audit review findings are satisfied.
+5. M2c: establish cross-market instrument identity, exchange-specific sessions/calendars, historical data adapters, INR/USD representation and data provenance for NSE/BSE and NYSE/NASDAQ.
+6. M3: define strategy and deterministic simulation contracts, portfolio/cash accounting, sizing, transaction costs, slippage and risk controls.
+7. M4: build Time Machine backtesting and reproducible Monte Carlo simulation.
+8. Later: paper trading engine, market/news intelligence agents and analytics dashboard.
 
-## Non-negotiable boundaries
-- Work exclusively on `feature/reliable-foundation`. Do not touch `main`.
-- Paper-only architecture; no live broker connectivity or order execution.
-- No hardcoded secrets, API keys, or live credentials.
-- No destructive Git operations (reset, clean, checkout, stash).
-- Do not commit, stage, or push M2b without human approval.
+## Review/remediation loop
+Claude independent verification -> ChatGPT triage and scoped technical direction -> Antigravity implementation and regression tests -> independent verification of the new snapshot. Avoid overlapping audits of unchanged code when a focused remediation cycle is more efficient.
+
+## Product and safety constraints
+- Shared core with market-specific adapters; do not fork the platform into separate India and US implementations.
+- Strictly paper-only: no real-money execution, no agent broker order-placement access, no autonomous live trading.
+- AI agents research and propose; deterministic risk controls remain authoritative.
+- Fail closed on missing, stale, malformed or contradictory data.
+- Preserve provenance, assumptions and simulation reproducibility.
+- No live broker execution milestone is authorised.
+
+## Git and change-control constraints
+- Work on `feature/reliable-foundation`; never merge to `main` without explicit approval.
+- Preserve all uncommitted work and `m2a-review.patch`.
+- No destructive Git operations.
+- Do not commit or push implementation changes without explicit user approval.

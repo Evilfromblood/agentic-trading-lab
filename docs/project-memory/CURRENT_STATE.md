@@ -2,15 +2,21 @@
 
 Last updated: 2026-11-07
 
+## Product direction
+- Markets: India (NSE/BSE) and United States (NYSE/NASDAQ).
+- Approach: extend the existing Agentic Trading Lab codebase using a shared core and market-specific adapters.
+- First major product priority after the data foundation: Time Machine (historical backtesting and reproducible Monte Carlo simulation).
+- Product remains strictly paper-only. No real-money execution or agent access to broker order-placement APIs.
+
 ## Repository
 - Repository: Evilfromblood/agentic-trading-lab
-- Active branch: `feature/reliable-foundation`
-- Current baseline commit: `1b7e5829474239495163da1d2d3349eb35ca9744` — `feat: complete market data quality foundation`.
-- Remote branch is pushed and synchronized with `origin/feature/reliable-foundation`.
+- Active development branch: `feature/reliable-foundation`
+- Baseline commit: `1b7e5829474239495163da1d2d3349eb35ca9744` — `feat: complete market data quality foundation`.
 - Do not merge to `main` without explicit user approval.
+- Treat the local working tree and GitHub branch as separate states; verify both before editing or synchronising.
 
 ## Local working copy state
-The working tree has local, uncommitted M2b modifications for the market data ingestion foundation and Claude audit remediation Batches 1 through 6:
+The working tree has local M2b modifications for the market data ingestion foundation and Claude audit remediation Batches 1 through 6:
 - `src/agentic_trading/market_data/__init__.py` (exports provider, adapter, pipeline interfaces, `ExchangeSession`, `CoverageStatus`, `ExchangeCalendar`, `US_EASTERN`, `get_exchange_timezone`)
 - `src/agentic_trading/market_data/models.py` (authoritative `ExchangeCalendar` completeness contract: contradiction rejection for trading_days/holidays overlap and special session conflicts; complete calendar requires explicit holiday evidence for omitted weekdays; incomplete calendar unlisted weekdays have no evidence and fail closed; `is_verified_trading_day` and `is_verified_non_trading_day` strictly distinguish verified vs unverified dates across NSE, BSE, NYSE, and NASDAQ)
 - `src/agentic_trading/market_data/quality.py` (session-aware cross-exchange mismatch checks `EXCHANGE_MISMATCH`; calendar holiday candle rejection `OUTSIDE_SESSION`; calendar-aware gap detection; D1/W1/MN1 grid anchor validation; sparse sequence handling via `allow_sparse`; specific exception handling eliminating BLE001)
@@ -37,12 +43,25 @@ Verified local Windows virtual environment output:
 
 ## Current milestone
 - Milestone 2a: COMPLETE and committed (`1b7e582`).
-- Milestone 2b: Batch 6 remediations complete and verified locally; ready for independent audit bundle packaging.
+- Milestone 2b: Batch 6 remediations complete and verified locally; packaged into `m2b-remediated-batch6-bundle.zip` ready for independent audit.
 
-## Environment
-Windows 11, repository path:
-`C:\Users\Rhyth\Downloads\agentic-trading-lab-main\agentic-trading-lab`
+## Development workflow
+1. Claude independently verifies a frozen snapshot.
+2. ChatGPT triages findings, separates confirmed defects from design decisions, and scopes remediation.
+3. Antigravity implements approved fixes and regression tests.
+4. Independent verification checks the new snapshot and remediation evidence.
+5. Repeat only where material defects remain.
 
-Interpreters:
-- Python 3.11.9: `.\.venv311\Scripts\python.exe` (with genuine `kiteconnect==5.2.2`, `keyring==25.7.0`, `requests==2.34.2`, `pytest-cov`, `detect-secrets==1.5.0`, `pip-audit`)
-- Python 3.14.4: `.\.venv\Scripts\python.exe` (with `pytest-cov`, `ruff`)
+## Safety boundary
+- Paper-only development.
+- No real-money order execution.
+- No agent access to broker order-placement APIs.
+- Deterministic risk controls remain authoritative.
+- Missing, stale, malformed or contradictory market data fails closed.
+- Human approval required for financial assumptions, credentials, any change to the safety boundary, commits/pushes when requested, and merges.
+
+## Environment and local state
+- Windows working copy: `C:\Users\Rhyth\Downloads\agentic-trading-lab-main\agentic-trading-lab`
+- Known project Python environments: `.venv` (Python 3.14) and `.venv311` (Python 3.11).
+- Use explicit environment executables; do not rely on system Python.
+- Preserve uncommitted work and `m2a-review.patch`. Never reset, clean, stash, overwrite or discard user changes.

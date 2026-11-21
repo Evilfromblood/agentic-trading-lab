@@ -97,102 +97,30 @@ Append decisions; do not silently rewrite historical decisions. Mark superseded 
   5. Priority 5 (Additional confirmed defects): Fixed D1 `close_time` calculation to ensure positive duration for post-open bars. Strictly rejected whitespace-padded numeric strings in `StandardDictAdapter` and models. Implemented explicit `__hash__` and `__eq__` on `FreshnessPolicy` for hashability and dataclass compatibility.
 - Rationale: Fully resolves all five priority areas identified in Claude A's independent adversarial audit without changing branch, altering commit history, or weakening safety boundaries.
 
-## D-016 — Claude B Audit Batch 2 remediations: Multi-exchange sessions, fail-closed coverage contract, deep freeze memoization, and calendar abstraction
-- Status: Accepted
-- Decision:
-  1. Priority 1 (Exchange & Session Architecture - H-1, COV-05, COV-07, COV-09): Extended `Exchange` enum to support `NSE`, `BSE`, `NYSE`, and `NASDAQ` with case-insensitive normalization. Implemented US Eastern timezone with Energy Policy Act of 2005 DST transitions (`_USEasternFallback`). Extended `ExchangeSession` with `for_exchange(exchange)` factory, special-session flags, and `is_valid_grid_anchor` for D1, W1, and MN1 (rejecting off-grid timestamps like 03:00 IST). Updated `Candle.close_time` to dynamically resolve exchange sessions. Added `EXCHANGE_MISMATCH` check rejecting cross-exchange session mixing.
-  2. Priority 2 (Fail-Closed Historical Coverage - H-2, COV-01): `ingest_historical` now defaults to `require_full_coverage=True` and `allow_partial=False`. If sequence boundaries are truncated or interior gaps are found, ingestion fails closed with `success=False` and empty `candles=()`. When `allow_partial=True` is explicitly passed, `success=False` is strictly maintained while populating `partial_candles` with the validated sequence, preventing downstream execution engines from accidentally processing partial backfills as successful. Defined distinct `CoverageStatus` enum values (`FULL_COVERAGE`, `COVERAGE_UNVERIFIED`, `TRUNCATED_COVERAGE`, `MARKET_CALENDAR_REQUIRED`, `EMPTY_COVERAGE`).
-  3. Priority 3 (Correct & Bounded Deep Freezing - H-3, M-1): Addressed CPython temporary object memory address reuse in `_deep_freeze` by storing `(orig_obj, frozen_obj, subtree_depth)` in memo tuples and validating `orig_obj is cur`. Bounded total traversal work across all nodes (primitives + containers) against a hard budget of `max_nodes=10000`. Prevented depth limit bypass on memoized DAG subtrees by checking `depth + subtree_depth > max_depth`.
-  4. Priority 4 (Calendar Evidence & Historical Windows - M-2, COV-03, COV-08): Introduced `ExchangeCalendar` abstraction supporting trading days, declared holidays, and special sessions. Historical sequences spanning weekends or holidays without calendar evidence emit `MARKET_CALENDAR_REQUIRED`. Intervening calendar-verified non-trading days pass cleanly. Added `allow_sparse=True` contract for illiquid/sparse feeds.
-  5. Priority 5 (Result-Object Invariant Hardening - M-4, ARCH-03): Enforced `__post_init__` checks on `IngestionResult` (requires valid `validation_result` on success) and `SequenceIngestionResult` (rejects `"BOGUS"` coverage statuses, rejects `raw_record_count < len(candles)`, and forbids `success=True` with `TRUNCATED_COVERAGE`, `EMPTY_COVERAGE`, or populated `partial_candles`).
-  6. Priority 6 (Paper-Only Broker Boundaries & CI Hardening - SEC-01, SEC-03): Wrapped `KiteConnect` in `_ReadOnlyKiteWrapper` and implemented explicit order placement/modification/cancellation methods raising `PermissionError("Order placement is forbidden in paper-only mode")`. Pinned CI actions with commit SHAs and version comments, configured multi-version matrix (Python 3.11 and 3.12), and added `.venv311/`, `.ruff_cache/`, `*.egg-info/` to `.gitignore`. Eliminated all broad `BLE001` (`except Exception:`) suppressions in market data core.
-- Rationale: Fully resolves all high-, medium-, and low-severity findings from Claude B's independent audit report without weakening paper-trading boundaries or altering commit history.
+## D-016 — Cross-market product direction and Time Machine priority
+- Status: Accepted (2026-11-03)
+- Decision: Build Agentic Trading Lab for both Indian markets (NSE/BSE) and US markets (NYSE/NASDAQ), extending the existing codebase. The first major product priority after the reliable data foundation is the Time Machine: historical backtesting and reproducible Monte Carlo simulation.
+- Architecture: Shared domain and simulation core with market-specific adapters, calendars, sessions, instrument metadata, currencies and transaction-cost models. Do not create separate India and US platforms.
+- Consequences: Complete and verify M2b first; then establish cross-market instrument/session/data foundations, strategy and deterministic simulation contracts, and build the Time Machine. Scanner, news intelligence, multi-agent research and dashboard capabilities follow rather than displacing this priority.
+- Safety: Remains strictly paper-only. No real-money order execution, no agent access to broker order-placement APIs, and no autonomous live trading. AI agents may research and propose; deterministic risk controls remain authoritative. Missing, stale, malformed or contradictory data fails closed.
+- Approval: User/product owner.
 
-## D-017 — Claude C Audit Batch 3 remediations: Fail-closed calendar evidence, Zerodha allowlist isolation, trustworthy coverage contracts, result invariants, and CI reproducibility
-- Status: Accepted
-- Decision:
-  1. Priority 1 (Calendar evidence must never fail open):
-     - Differentiated unpopulated calendars (`is_populated is False`) from populated calendars. Empty calendars never claim evidence or provide verified coverage (`has_evidence_for_range` returns False).
-     - Candles on declared calendar holidays/non-trading days are strictly rejected with `DataQualityErrorCode.OUTSIDE_SESSION`.
-     - Ingestion pipeline requires sufficient calendar evidence covering the full query window before claiming `CoverageStatus.FULL_COVERAGE`.
-     - Clearly distinguished verified non-trading days (valid multi-day transition), missing calendar evidence (`MARKET_CALENDAR_REQUIRED`), and actual missing trading days (`MISSING_INTERVAL`).
-  2. Priority 2 (Zerodha paper-only boundary enforcement):
-     - Replaced denylist-based forwarding with strict `_READ_ONLY_ALLOWLIST` on `_ReadOnlyKiteWrapper`.
-     - Blocked private attribute access to underlying KiteConnect client (`_client`, `__client`, `_raw_client`) via `__getattribute__`.
-     - Explicitly blocked order placement, modification, cancellation, exit, GTT, position conversion, mutual funds, and raw HTTP methods (`_post`, `_request`, `_put`, `_delete`), raising `PermissionError`.
-     - Documented that Python in-process wrappers enforce application software policy, not an OS sandbox.
-  3. Priority 3 (Trustworthy coverage success & explicit sparse mode):
-     - Implemented `CoverageStatus.SPARSE_COVERAGE` and defined explicit policy for illiquid feeds.
-     - Relaxed outer window boundary edge requirements when `allow_sparse=True` is explicitly requested, supporting illiquid instruments without treating interior unexplained gaps as valid.
-     - Implemented `require_full_coverage` contract: when `require_full_coverage=True`, any unverified (`COVERAGE_UNVERIFIED`) or sparse (`SPARSE_COVERAGE`) data fails closed with `success=False` and explicit error code, preventing unverified data from being accidentally accepted downstream as complete data.
-  4. Priority 4 (CI and reproducibility):
-     - Added multi-version CI matrix for Python 3.11, 3.12, 3.13, and 3.14-dev in `.github/workflows/ci.yml`.
-     - Configured Ruff with explicit rule selection (`F, E4, E7, E9, B, BLE, I`) in `pyproject.toml`.
-     - Added test coverage threshold (`--cov-fail-under=85`) and dependency audit step (`pip-audit`) to CI.
-     - Created architectural import boundary tests (`tests/test_import_boundaries.py`) verifying zero dependencies from market_data/risk_engine to broker execution.
-     - Created reproducible dependency lockfile `requirements.lock`.
-  5. Priority 5 (Result-object constructor invariants):
-     - Added strict validation in `SequenceIngestionResult.__post_init__`: enforces `Candle` instance types, enforces uniform symbol and exchange across all candles, validates strictly monotonic timestamps, forbids `success=True` with `MARKET_CALENDAR_REQUIRED`, `TRUNCATED_COVERAGE`, or `EMPTY_COVERAGE`, forbids single intraday candle claiming `FULL_COVERAGE`, and forbids `success=False` with `FULL_COVERAGE`.
-  6. Additional Correctness Fixes:
-     - MN1 close-time: Implemented exact calendar month boundary calculation using `calendar.monthrange` for leap/non-leap February (28/29) and variable month lengths (30/31).
-     - US Eastern fallback: Raised explicit `ValueError` for historical dates prior to 2007 in `_USEasternFallback`, requiring reliable IANA timezone data.
-     - D1 midnight boundaries: Handled midnight-ending requests (`00:00:00`) consistently against previous day session close.
-     - Caller-supplied `now`: Constrained injected `now` parameter against arbitrary distant future timestamps (> 365 days relative to system wall clock).
-     - Exception safety (SEC-03): Eliminated all remaining broad `except Exception:` blocks across domain and adapter layers, catching explicit exception tuples including `RuntimeError`.
-- Rationale: Fully resolves all findings from Claude C's independent audit report without modifying main, changing branches, or altering commit history.
+## D-017 — Iterative verification/remediation workflow
+- Status: Accepted (2026-11-03)
+- Decision: Use a resource-efficient cycle: Claude independent verification -> ChatGPT finding triage and technical direction -> Antigravity scoped remediation -> focused independent verification of the changed snapshot.
+- Consequences: Do not require multiple overlapping audits before fixing a verified defect. Use Claude reviews at meaningful quality gates, preserve each audited snapshot and its SHA-256, and ensure reviewers inspect the exact same snapshot. Antigravity must add regression tests and report actual commands/results. ChatGPT distinguishes confirmed defects, design decisions and false positives before authorising scope.
+- Safety: No concurrent edits to a frozen audit snapshot. No destructive Git operations. No commit, push or merge without explicit user approval; never modify `main`.
 
-## ADR-015: M2b Remediation Batch 4 — Final Blocker Resolution (H-1, N-1, H-2, M-2, M-3)
-
-- **Date:** 2026-11-07
-- **Status:** Accepted / Implemented
-- **Context:** Claude D's independent Batch 3 audit identified 5 remaining actionable issues: H-1 (Zerodha raw-client escape paths via bound methods and attribute reflection), N-1 (unhandled ValueError in ingestion pipeline on holiday candle rejection), H-2 (authoritative calendar completeness contract and removal of year-level holiday inference), M-2 (enforceable CI matrix, blocking pip-audit, secret scanning, and honest dependency strategy in requirements.lock), and M-3 (genuine 85% pytest-cov verification).
-- **Decisions:**
-  1. **H-1 (Zerodha Raw Client Escape Path Elimination):** Removed `_get_raw_client` and `_get_underlying`. Replaced direct attribute storage with `__slots__ = ("__weakref__",)` and private module-level `weakref.WeakKeyDictionary` mappings. Implemented explicit forwarder methods on `_ReadOnlyKiteWrapper` so all allowlisted methods return `method.__self__ is wrapper` rather than leaking the underlying client. Blocked reflection access (`vars()`, `__dict__`, `object.__getattribute__`, class-level unbound methods). Documented in-process wrapper boundaries and requirement for restricted broker API credentials.
-  2. **N-1 (Holiday Rejection Pipeline Crash Resolution):** Updated `ingest_historical` quality gate failure branch so sequences rejected due to holiday candles (`OUTSIDE_SESSION`) return a typed `SequenceIngestionResult(success=False, error_code="QUALITY_GATE_REJECTED", coverage_status=CoverageStatus.COVERAGE_UNVERIFIED.value)`. Guaranteed that no failed result can ever carry contradictory `FULL_COVERAGE`. Synchronized `_require_valid_now` docstring to 365 days.
-  3. **H-2 (Authoritative Calendar Completeness Contract):** Added `complete: bool = False` to `ExchangeCalendar`. Removed year-level inference from unrelated holidays. Required explicit `coverage_start` and `coverage_end` bounds for complete calendars. Added `is_verified_trading_day` and `is_verified_non_trading_day` to cleanly distinguish verified trading days, non-trading days, and unverified dates. Preserved support across NSE, BSE, NYSE, and NASDAQ.
-  4. **M-2 (Enforceable CI & Honest Dependency Specification):** Updated `.github/workflows/ci.yml` to test stable Python 3.14 without `continue-on-error`, made `pip-audit` blocking, added automated secret scanning, included `v3-zerodha/src` in Ruff and compileall, and enforced `--cov-fail-under=85`. Documented the core runtime zero-dependency architecture in `requirements.lock`.
-  5. **M-3 (Genuine 85% Test Coverage):** Installed `pytest-cov` in both virtual environments (.venv311 and .venv). Added 21 targeted adversarial and regression tests in `tests/test_claude_batch4_regressions.py`. Achieved 87.12% genuine coverage across 269 tests on both Python 3.11.9 and 3.14.4.
-
-## ADR-016: M2b Remediation Batch 5 — Closure-Held Zerodha Dispatch and Incomplete Calendar Fail-Closed Contract (F-1, F-2, F-3)
-
-- **Date:** 2026-11-07
-- **Status:** Accepted / Implemented
-- **Context:** Claude's Batch 4 targeted verification confirmed three specific defects:
-  1. F-1 (Critical): Module-level objects in `zerodha_connector.py` (`_wrapper_clients`, `_connector_clients`, `_get_client_for_wrapper`, `_get_client_for_connector`) exposed raw `KiteConnect` clients to callers who could invoke mutating operations (`place_order`, `place_gtt`, `_post`).
-  2. F-2 (High): `ExchangeCalendar` with `complete=False` auto-populated `coverage_start` and `coverage_end` from `trading_days`, causing unlisted weekdays between min and max to be marked as verified non-trading days (`is_verified_non_trading_day == True`), allowing missing trading day gaps to be accepted as complete.
-  3. F-3 (Medium): Secret scanning in CI was advisory (`detect-secrets scan` without failure gating) rather than blocking via baseline and hook.
-- **Decisions:**
-  1. **F-1 (Closure-Held Zerodha Dispatch & Module Registry Elimination):**
-     - Completely removed `_wrapper_clients`, `_connector_clients`, `_get_client_for_wrapper`, and `_get_client_for_connector`.
-     - Adopted instance-isolated closure dispatch: `_dispatch` is stored in `__slots__ = ("_dispatch", "__weakref__")`.
-     - Overrode `__getattribute__` on both `_ReadOnlyKiteWrapper` and `ZerodhaReadOnlyConnector` to raise `PermissionError` on any access to `_dispatch`, `__dispatch`, `_client`, `_kite`, or other internal attributes.
-     - On client initialization, preemptively neutralized mutation methods on the underlying client instance (`place_order`, `modify_order`, `cancel_order`, `exit_order`, `place_gtt`, `modify_gtt`, `delete_gtt`, `convert_position`, `place_mf_order`, `cancel_mf_order`, `_post`, `_request`, `_put`, `_delete`) to raise `PermissionError`, enforcing concentric rings of defense.
-     - Confirmed all 20 allowlisted read-only methods remain accessible and return `method.__self__ is wrapper`.
-  2. **F-2 (Incomplete Calendar Fail-Closed Evidence Contract):**
-     - Updated `ExchangeCalendar.__post_init__` so `coverage_start` and `coverage_end` are auto-populated from `trading_days` ONLY when `complete=True`.
-     - In `has_evidence_for_date`: when `complete=False`, returns `True` ONLY if date is explicitly in `trading_days`, `holidays`, or `special_sessions`. Unlisted weekdays have no evidence.
-     - In `has_evidence_for_range`: when `complete=False`, every date in the range must have explicit evidence; any missing date causes the range to fail closed (`False`).
-     - In `is_verified_non_trading_day`: when `complete=False`, unlisted weekdays are NEVER verified non-trading days (only explicit holidays and standard non-special weekends are non-trading days).
-     - Verified across all four exchanges (NSE, BSE, NYSE, NASDAQ) that incomplete calendars cause D1 and M5 sequences with skipped weekdays to fail closed and reject `require_full_coverage=True`.
-  3. **F-3 (Blocking Secret Scanning):**
-     - Generated root-level `.secrets.baseline` in UTF-8 binary encoding with zero leaks.
-     - Updated `.github/workflows/ci.yml` secret scanning step to execute `git ls-files -z | xargs -0 detect-secrets-hook --baseline .secrets.baseline`, failing the build immediately on any unmanaged secret.
-  4. **Test Suite & Isolation Hardening:**
-     - Fixed `sys.modules["keyring"]` and `sys.modules["kiteconnect"]` pollution in regression test suites using scoped `patch.dict`.
-     - Added 14 targeted adversarial tests in `tests/test_claude_batch5_regressions.py`.
-     - Validated 283/283 tests passing with 87.12% coverage on both Python 3.11.9 and Python 3.14.4.
-
-
-## ADR-017: M2b Remediation Batch 6 — Zerodha In-Process Read-Only Boundary Redesign, Calendar Completeness Contract, Secret Scanning Rigor, and Test Coverage Enforcement
-
-- **Date:** 2026-11-07
-- **Status:** Accepted / Implemented
-- **Context:** Claude A's Batch 5 audit returned REJECT on `m2b-remediated-batch5-bundle.zip` (SHA-256 `e708153be0bbbef6cbe7962f1d3e497e1bceb40704cfcd241be1057eac83013c`), finding:
-  1. F1-A & F1-B (Critical): The closure-held dispatch mechanism used `object.__getattribute__` to recover `_dispatch`, and its closure exposed the raw client. Furthermore, mutating caller-supplied KiteConnect instances violated library contracts and broke legitimate reads.
-  2. F1-D (High): Keyring handling broke connector construction in environments without keyring backends.
-  3. F2-A, F2-B, F2-C (High): Calendar regression tests in Batch 5 lacked `exchange` identity; `complete=True` calendars silently inferred unexplained missing weekdays as holidays; contradictory calendar declarations (dates listed as both trading days and holidays, or special sessions with open >= close) were not rejected.
-  4. F3-A & F3-B (Medium): Secret scanning baseline was not version-pinned; exclusion regex was unanchored and masked `.github` and `.gitlab-ci.yml`.
-  5. T-1 (Medium): Integration tests substituted stubs instead of testing against genuine `kiteconnect==5.2.2`.
+## ADR-017 (Batch 6) — Remediation Architecture for Zerodha Facade, Calendar Contradictions, and Secret Baseline Pinning
+- **Status:** Accepted (2026-11-07)
+- **Context:** Claude A's independent audit of Batch 5 returned REJECT based on:
+  1. F1-A (Critical): In-process isolation was subverted by `object.__getattribute__` retrieving closure-dispatch internals.
+  2. F1-B (High): Overwriting caller KiteConnect methods broke caller read operations.
+  3. F1-D (Medium): Unconfigured keyrings crashed connector construction.
+  4. F2-A (Critical): `ExchangeCalendar` accepted contradictory date definitions.
+  5. F2-B (Critical): Incomplete calendar missing evidence returned false success.
+  6. F3-A & F3-B (Medium): Secret scanning baseline was not version-pinned; exclusion regex was unanchored and masked `.github` and `.gitlab-ci.yml`.
+  7. T-1 (Medium): Integration tests substituted stubs instead of testing against genuine `kiteconnect==5.2.2`.
 - **Decisions:**
   1. **Priority 1 (F1-A, F1-B, F1-D: Zerodha Read-Only Boundary Redesign):**
      - Never mutate caller-supplied KiteConnect instances: callers' objects remain 100% unmutated.
