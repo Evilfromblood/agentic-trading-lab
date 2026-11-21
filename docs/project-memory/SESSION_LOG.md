@@ -363,3 +363,43 @@ Append concise entries in reverse chronological order. Record verified outcomes,
      - pip-audit: 0 known vulnerabilities.
   5. **Packaging:**
      - Packaged `m2b-remediated-batch7b-bundle.zip` in parent directory and computed SHA-256 hash.
+
+
+## 2026-11-22 — Session: Milestone 2c (Cross-Market Foundation, Instrument Registry, Corporate Actions, and Stored Replay Fixtures)
+
+- **Task:** Implement Milestone 2c on `feature/reliable-foundation` across 4 specialist roles (`agency-backend-architect` -> `agency-security-architect` -> `agency-reality-checker` -> `agency-code-reviewer`) adhering strictly to paper-only constraints and zero inline `#` comments.
+- **Files Created/Modified:**
+  - `src/agentic_trading/market_data/instruments.py` (new)
+  - `src/agentic_trading/market_data/corporate_actions.py` (new)
+  - `src/agentic_trading/market_data/replay_fixtures.py` (new)
+  - `src/agentic_trading/market_data/__init__.py` (modified: clean exports)
+  - `tests/test_m2c_cross_market_foundation.py` (new: 24 adversarial tests)
+  - `docs/project-memory/DECISION_LOG.md` (ADR-020)
+  - `docs/project-memory/CURRENT_STATE.md` (updated)
+  - `docs/project-memory/NEXT_ACTIONS.md` (updated)
+  - `docs/project-memory/SESSION_LOG.md` (updated)
+- **Actions Taken:**
+  1. **Cross-Market Instruments & Currency Isolation (`instruments.py`):**
+     - Defined `Currency` enum (`INR`, `USD`) and `CurrencyMismatchError`.
+     - Implemented immutable `Money` dataclass with strict currency safety: validates non-negative finite `Decimal`, rejects `float`, `bool`, and `bytes`. Addition and subtraction require matching currency; scalar multiplication supports `Decimal` and `int` (rejecting `float`/`bool`).
+     - Defined `AssetClass` (`EQUITY`, `COMMODITY`, `INDEX`, `FOREX`, `CRYPTO`).
+     - Implemented `Instrument` with strict exchange-currency pairing validation (`NSE`/`BSE` requires `INR`; `NYSE`/`NASDAQ` requires `USD`), positive finite `tick_size`, positive integer `lot_size`, and immutable `provider_tokens` dictionary (`MappingProxyType`).
+     - Implemented `InstrumentRegistry` with duplicate detection, thread-safe lookup, and O(1) resolution by `(exchange, symbol)` or `(provider, token)` failing closed with `UnknownInstrumentError`.
+  2. **Corporate Actions & Symbol Lineage (`corporate_actions.py`):**
+     - Modeled `CorporateAction` and `CorporateActionType` (`SPLIT`, `BONUS`, `DIVIDEND`, `SYMBOL_CHANGE`).
+     - Implemented `resolve_symbol_lineage` to trace rename histories bidirectionally with topological graph cycle detection (`ValueError`).
+     - Implemented `adjust_candles_for_corporate_actions` applying cumulative adjustment factors to historical OHLC, preserving OHLC invariants, quantizing prices to `tick_size` using `ROUND_HALF_EVEN`, and inverse-scaling volumes.
+  3. **Tier-2 Stored Replay Fixtures (`replay_fixtures.py`):**
+     - Defined `FixtureManifest` with SHA-256 payload digest.
+     - Implemented `save_replay_fixture` with canonical JSON serialization, path-traversal prevention, and atomic manifest generation.
+     - Implemented `StoredReplayFixtureProvider` extending `MarketDataProvider`: cryptographically verifies raw payload integrity on load via `hmac.compare_digest` against manifest SHA-256 (raising `FixtureIntegrityError` on tampering or mismatch), and provides deterministic `[start_time, end_time)` window filtering.
+  4. **Adversarial Regression Tests (`test_m2c_cross_market_foundation.py`):**
+     - 24 comprehensive tests covering currency arithmetic, instrument validation, duplicate prevention, corporate action price/volume adjustment, cyclic rename graph rejection, and replay fixture tampering/mismatch detection.
+     - 0 inline `#` comments in all code and test files.
+- **Verification Evidence:**
+  - Full pytest suite: **362 passed in 4.67s** on Python 3.11.9 (`.venv311`) and **362 passed in 2.06s** on Python 3.14.4 (`.venv`).
+  - Total test coverage: **86.56%** (exceeds mandatory 85% requirement with `--cov-fail-under=85`).
+  - Ruff check: clean (0 errors) on `src`, `tests`, and `v3-zerodha/src`.
+  - Python compileall: 0 errors on both Python 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` clean (0 leaks).
+  - Comment check: verified 0 `#` comment characters across all 5 new/edited files.

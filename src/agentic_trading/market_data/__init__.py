@@ -1,7 +1,8 @@
-"""Market data foundation for Indian equities (NSE/BSE).
+"""Market data foundation for Indian equities (NSE/BSE) and US equities (NYSE/NASDAQ).
 
 Provides canonical data models, strict quality gates, deterministic
-data validation mechanisms, and provider ingestion interfaces.
+data validation mechanisms, provider ingestion interfaces, instrument registries,
+corporate action adjustments, and stored replay fixture providers.
 """
 from __future__ import annotations
 
@@ -9,6 +10,12 @@ from agentic_trading.market_data.adapters import (
     ProviderAdapter,
     RawDataValidationError,
     StandardDictAdapter,
+)
+from agentic_trading.market_data.corporate_actions import (
+    CorporateAction,
+    CorporateActionType,
+    adjust_candles_for_corporate_actions,
+    resolve_symbol_lineage,
 )
 from agentic_trading.market_data.ingestion import (
     CoverageStatus,
@@ -18,6 +25,16 @@ from agentic_trading.market_data.ingestion import (
     MarketDataIngestionPipeline,
     SequenceIngestionResult,
     UnsupportedIntervalFreshnessError,
+)
+from agentic_trading.market_data.instruments import (
+    AssetClass,
+    Currency,
+    CurrencyMismatchError,
+    DuplicateInstrumentError,
+    Instrument,
+    InstrumentRegistry,
+    Money,
+    UnknownInstrumentError,
 )
 from agentic_trading.market_data.models import (
     DEFAULT_EXCHANGE_SESSION,
@@ -59,24 +76,40 @@ from agentic_trading.market_data.quality import (
     validate_candle,
     validate_candle_sequence,
 )
+from agentic_trading.market_data.replay_fixtures import (
+    FixtureIntegrityError,
+    FixtureManifest,
+    StoredReplayFixtureProvider,
+    save_replay_fixture,
+)
 
 __all__ = [
-    "DEFAULT_EXCHANGE_SESSION",
-    "IST",
-    "US_EASTERN",
+    "AssetClass",
     "Candle",
     "CandleInterval",
+    "CorporateAction",
+    "CorporateActionType",
     "CoverageStatus",
+    "Currency",
+    "CurrencyMismatchError",
+    "DEFAULT_EXCHANGE_SESSION",
     "DataQualityErrorCode",
+    "DuplicateInstrumentError",
     "Exchange",
     "ExchangeCalendar",
     "ExchangeSession",
+    "FixtureIntegrityError",
+    "FixtureManifest",
     "FreshnessPolicy",
     "HistoricalDataRequest",
     "IngestionResult",
+    "Instrument",
+    "InstrumentRegistry",
+    "IST",
     "MarketCalendarRequiredError",
     "MarketDataIngestionPipeline",
     "MarketDataProvider",
+    "Money",
     "ProviderAdapter",
     "ProviderConnectionError",
     "ProviderError",
@@ -87,9 +120,13 @@ __all__ = [
     "RawDataValidationError",
     "SequenceIngestionResult",
     "StandardDictAdapter",
+    "StoredReplayFixtureProvider",
     "SyntheticMarketDataProvider",
+    "US_EASTERN",
+    "UnknownInstrumentError",
     "UnsupportedIntervalFreshnessError",
     "ValidationResult",
+    "adjust_candles_for_corporate_actions",
     "check_candle_structure",
     "check_duplicate_timestamps",
     "check_missing_intervals",
@@ -103,6 +140,8 @@ __all__ = [
     "check_timing_and_provenance",
     "check_volume",
     "get_exchange_timezone",
+    "resolve_symbol_lineage",
+    "save_replay_fixture",
     "validate_candle",
     "validate_candle_sequence",
 ]

@@ -174,3 +174,15 @@ Append decisions; do not silently rewrite historical decisions. Mark superseded 
   2. **F3 (Block POST Endpoints):** Remove `order_margins`, `basket_order_margins`, and `get_virtual_contract_note` from `_READ_ONLY_ALLOWLIST` and add to `_BLOCKED_METHODS`. Add explicit method overrides on `ReadOnlyKiteConnect`, `_ReadOnlyKiteWrapper`, and `ZerodhaReadOnlyConnector` raising `PermissionError` before transport.
 - **Consequences:** Injected clients remain 100% immutable across wrapping, session checks, and logout. All POST-based margin and contract note methods fail closed with `PermissionError`.
 - **Verification:** 338 tests pass across the suite with 85.02% coverage on Python 3.11 and Python 3.14.
+
+
+## ADR-020 (M2c) — Cross-Market Foundation, Instrument Registry, Corporate Actions, and Stored Replay Fixtures
+- **Status:** Accepted (2026-11-22)
+- **Context:** Milestone 2c establishes cross-market instrument models, strict currency isolation (INR vs USD), corporate action accounting (splits, bonuses, dividends, symbol lineage tracking), and Tier-2 stored replay fixtures with cryptographic tamper detection.
+- **Decisions:**
+  1. **Currency Isolation & Money Model:** Implemented `Currency` (INR, USD) and immutable `Money` dataclass rejecting float, bool, bytes, and non-finite Decimal. Cross-currency arithmetic (`+`, `-`) strictly raises `CurrencyMismatchError`. Scalar multiplication supports Decimal and int, rejecting float/bool.
+  2. **Instrument & Registry:** Defined `Instrument` enforcing strict exchange-currency pairing (`NSE`/`BSE` -> `Currency.INR`, `NYSE`/`NASDAQ` -> `Currency.USD`), positive finite `tick_size`, integer `lot_size >= 1`, and deep-frozen `provider_tokens`. `InstrumentRegistry` provides O(1) resolution by `(exchange, symbol)` and `(provider, token)` with duplicate prevention and fail-closed `UnknownInstrumentError`.
+  3. **Corporate Actions & Symbol Lineage:** Modeled `CorporateAction` (SPLIT, BONUS, DIVIDEND, SYMBOL_CHANGE). `resolve_symbol_lineage` deterministically traces rename graphs forward/backward with cycle detection (`ValueError`). `adjust_candles_for_corporate_actions` adjusts historical OHLC prices by cumulative factors and quantizes to `tick_size` (`ROUND_HALF_EVEN`) while preserving OHLC invariants and inverse-scaling volume.
+  4. **Tier-2 Stored Replay Fixtures:** Defined `FixtureManifest` with SHA-256 payload digest. `save_replay_fixture` writes canonical JSON payloads and manifests with path-traversal prevention. `StoredReplayFixtureProvider` inherits from `MarketDataProvider`, verifies cryptographic integrity on load/fetch via `hmac.compare_digest`, and provides deterministic window filtering `[start_time, end_time)`.
+- **Consequences:** Strategy engines and Time Machine backtesting can now query verified cross-market instruments, replay frozen historical snapshots from disk without network access, and adjust for corporate actions without floating-point drift.
+- **Verification:** 362 passed across both Python 3.11.9 (`.venv311`) and Python 3.14.4 (`.venv`) with 86.56% test coverage, clean Ruff linting, zero compile errors, and zero unbaselined secrets.

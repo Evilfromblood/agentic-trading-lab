@@ -27,6 +27,10 @@ The working tree has local M2b modifications for the market data ingestion found
 - `.github/workflows/ci.yml` (blocking secret scanning via pinned `detect-secrets==1.5.0` scanning `requirements.lock`; stable Python 3.14 matrix entry; blocking `pip-audit`; installation from `requirements.lock` and `[dev,zerodha-readonly]`; coverage command enforcing `--cov-fail-under=85`)
 - `.secrets.baseline` (UTF-8 secret scanning baseline pinned to version 1.5.0 with 0 detected leaks; removed `is_lock_file` filter so `requirements.lock` is scanned; anchored exclusion regex excluding only exact generated/cache directories without masking `.github` or `.gitlab-ci.yml`)
 - `pyproject.toml` (Ruff configuration selecting `F, E4, E7, E9, B, BLE, I`, dev dependencies `pytest-cov>=5.0`, optional dependency `requests>=2.32.0`, pythonpath including `src` and `v3-zerodha/src`)
+- `src/agentic_trading/market_data/instruments.py` (M2c: Currency enum for INR/USD, CurrencyMismatchError, immutable Money dataclass with strict arithmetic, AssetClass enum, Instrument model enforcing strict exchange-currency pairing and positive tick_size, InstrumentRegistry with duplicate prevention and O(1) resolution)
+- `src/agentic_trading/market_data/corporate_actions.py` (M2c: CorporateAction model for splits, bonuses, dividends, symbol changes; resolve_symbol_lineage with cycle detection; adjust_candles_for_corporate_actions with tick_size quantization and inverse volume scaling)
+- `src/agentic_trading/market_data/replay_fixtures.py` (M2c: FixtureManifest with SHA-256 payload digest; save_replay_fixture with canonical JSON serialization and path-traversal prevention; StoredReplayFixtureProvider with cryptographic verification via hmac.compare_digest and deterministic window filtering)
+- `tests/test_m2c_cross_market_foundation.py` (M2c: 24 comprehensive adversarial regression tests covering currency isolation, instrument registry, corporate actions, lineage cycle rejection, and stored replay fixture tamper detection)
 - `requirements.lock` (pinned dependency specification with exact verified pins: `kiteconnect==5.2.2`, `keyring==25.7.0`, `requests==2.34.2`, `ruff==0.17.3`, `pytest==9.2.0`, `pytest-cov==7.1.0`, `detect-secrets==1.5.0`)
 - `tests/test_claude_batch7_regressions.py` (28 regression tests covering closure encapsulation, slot removal, uniform mutation blocking, keyring bypass, D1/M5 ingestion fail-closed `TRUNCATED_COVERAGE` across NSE/BSE/NYSE/NASDAQ, secret scanning of `requirements.lock`, injected client zero-mutation in session/logout, and POST endpoint blocking)
 
@@ -35,14 +39,15 @@ Verified local Windows virtual environment output:
 - Ruff on `src/`, `tests/`, and `v3-zerodha/src`: passed (`All checks passed!`).
 - Python compileall: `python -m compileall -q src tests v3-zerodha/src` passed with exit code 0 on both 3.11.9 and 3.14.4.
 - `git diff --check`: exit code 0 (no whitespace errors or merge markers).
-- Full pytest suite: **338 passed in 2.24s** on genuine Python 3.11.9 (.venv311) and **338 passed in 1.42s** on Python 3.14.4 (.venv).
-- Genuine pytest-cov coverage: **85.02%** (exceeding mandatory 85% threshold with `--cov-fail-under=85`).
+- Full pytest suite: **362 passed in 4.67s** on genuine Python 3.11.9 (.venv311) and **362 passed in 2.06s** on Python 3.14.4 (.venv).
+- Genuine pytest-cov coverage: **86.56%** (exceeding mandatory 85% threshold with `--cov-fail-under=85`).
 - Secret scanning hook: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files, scanning `requirements.lock`.
 - Dependency audit: `pip-audit` exited with code 0 (0 known vulnerabilities).
 
 ## Current milestone
 - Milestone 2a: COMPLETE and committed (`1b7e582`).
-- Milestone 2b: Batch 7 & 7b remediations complete and verified locally; packaged into `m2b-remediated-batch7b-bundle.zip` ready for independent audit.
+- Milestone 2b: COMPLETE and committed (`edd383a`).
+- Milestone 2c: COMPLETE and verified locally in working tree; ready for M3.
 
 ## Development workflow
 1. Claude independently verifies a frozen snapshot.
