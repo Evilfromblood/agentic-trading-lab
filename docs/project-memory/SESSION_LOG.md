@@ -220,3 +220,53 @@ Append concise entries in reverse chronological order. Record verified outcomes,
   - Python compileall (`src`, `tests`, `v3-zerodha/src`): **0 errors** on both Python versions.
   - `git diff --check`: **0 errors**.
   - All original bundles and working tree preserved; no Git commits or branch changes made.
+
+
+## 2026-11-07 — Session: M2b Remediation Batch 6 Implementation & Verification
+
+- **Task:** Remediate all confirmed technical defects from Claude A's Batch 5 audit report (REJECT on `m2b-remediated-batch5-bundle.zip`, SHA-256 `e708153be0bbbef6cbe7962f1d3e497e1bceb40704cfcd241be1057eac83013c`).
+- **Files Modified:**
+  - `v3-zerodha/src/agentic_trading/zerodha_connector.py`
+  - `src/agentic_trading/market_data/models.py`
+  - `src/agentic_trading/market_data/ingestion.py`
+  - `.github/workflows/ci.yml`
+  - `.secrets.baseline`
+  - `tests/test_claude_batch2_regressions.py`
+  - `tests/test_claude_batch4_regressions.py`
+  - `tests/test_claude_batch5_regressions.py`
+  - `tests/test_claude_batch6_regressions.py` (new)
+  - `docs/project-memory/DECISION_LOG.md` (ADR-017)
+  - `docs/project-memory/CURRENT_STATE.md`
+  - `docs/project-memory/ISSUES_AND_RISKS.md`
+  - `docs/project-memory/NEXT_ACTIONS.md`
+  - `docs/project-memory/SESSION_LOG.md`
+  - `docs/project-memory/AGENT_HANDOFF.md`
+  - `AUDIT_BRIEF.md`
+- **Actions Taken:**
+  1. Priority 1 (F1-A, F1-B, F1-D):
+     - Redesigned Zerodha read-only boundary using slotted facade composition (`__slots__ = ("_target", "__weakref__")`).
+     - Stopped mutating caller-supplied KiteConnect instances; caller methods and attributes remain 100% unmutated.
+     - Added `ReadOnlyTransportAdapter(HTTPAdapter)` intercepting requests at transport level to block any non-GET request with `PermissionError`.
+     - Implemented `ReadOnlyKiteConnect` which mounts `ReadOnlyTransportAdapter` and overrides `_request` and write methods.
+     - Implemented bound method dispatch via `types.MethodType` ensuring `wrapper.method.__self__ is wrapper`.
+     - Full API audit blocking all order methods, autoslice orders, GTT, MF, MF SIP, convert_position, session mutation (`generate_session`, `renew_access_token`, `invalidate_access_token`, `invalidate_refresh_token`), and raw HTTP methods (`_post`, `_put`, `_delete`, `_request`).
+     - Safe keyring helpers catch backend errors; missing or unconfigured keyrings never break connector construction.
+  2. Priority 2 (F2-A, F2-B, F2-C):
+     - Implemented contradiction rejection in `ExchangeCalendar.__post_init__` for trading_days/holidays overlap and special session conflicts.
+     - Completeness contract: complete calendar requires explicit holiday evidence for omitted weekdays; incomplete calendar unlisted weekdays have no evidence and fail closed.
+     - Incomplete calendar fail-closed: sequences across unverified multi-day gaps fail closed with exact error code `MARKET_CALENDAR_REQUIRED` and coverage status `CoverageStatus.MARKET_CALENDAR_REQUIRED.value`.
+     - Ingestion across missing intermediate trading days without calendar evidence fails closed with exact error code `TRUNCATED_COVERAGE` and coverage status `TRUNCATED_COVERAGE`.
+     - Tested across all four exchanges: NSE, BSE, NYSE, NASDAQ for D1 and M5 sequences.
+  3. Priority 3 (F3-A, F3-B):
+     - Anchored exclusion regex strictly avoids masking `.github/` or `.gitlab-ci.yml`.
+     - Pinned `detect-secrets==1.5.0` in CI with `.secrets.baseline` containing version 1.5.0 and zero unbaselined secrets.
+     - Verified detection of dummy AWS secrets across `.github/workflows/leak.yml`, `.github/leak.txt`, `.gitlab-ci.yml`, `src/leak.py`, `.env`, and nested ZIP files.
+  4. Priority 4 & Verification:
+     - Verified genuine `kiteconnect==5.2.2`, `keyring==25.7.0`, `requests==2.34.2`, `pytest-cov`, and `ruff` in Python 3.11 (`.venv311`) and Python 3.14 (`.venv`).
+     - Full test suite: **310 passed in 1.59s** on Python 3.11.9 and **310 passed in 0.84s** on Python 3.14.4.
+     - Test coverage: **85.49%** (exceeding mandatory 85% threshold with `--cov-fail-under=85`).
+     - Generated separate test reports: `python311_verification_report.txt`, `python314_verification_report.txt`.
+     - Ruff check passed with zero errors (`All checks passed!`).
+     - Python compileall passed with zero errors on both interpreters.
+     - `detect-secrets-hook` passed with zero errors across all tracked files.
+     - `pip-audit` passed with zero known vulnerabilities.

@@ -171,10 +171,10 @@ if KiteConnect is not None:
             self.reqsession.mount("https://", adapter)
             self.reqsession.mount("http://", adapter)
 
-        def _request(self, route: str, method: str, *args: Any, **kwargs: Any) -> Any:
+        def _request(self, method: str, *args: Any, **kwargs: Any) -> Any:
             if method.upper() != "GET":
                 raise PermissionError(f"HTTP method '{method}' is forbidden in read-only mode")
-            return super()._request(route, method, *args, **kwargs)
+            return super()._request(method, *args, **kwargs)
 
         def _post(self, *args: Any, **kwargs: Any) -> Any:
             raise PermissionError("HTTP POST is forbidden in read-only mode")

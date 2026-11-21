@@ -181,3 +181,39 @@ Append decisions; do not silently rewrite historical decisions. Mark superseded 
      - Fixed `sys.modules["keyring"]` and `sys.modules["kiteconnect"]` pollution in regression test suites using scoped `patch.dict`.
      - Added 14 targeted adversarial tests in `tests/test_claude_batch5_regressions.py`.
      - Validated 283/283 tests passing with 87.12% coverage on both Python 3.11.9 and Python 3.14.4.
+
+
+## ADR-017: M2b Remediation Batch 6 — Zerodha In-Process Read-Only Boundary Redesign, Calendar Completeness Contract, Secret Scanning Rigor, and Test Coverage Enforcement
+
+- **Date:** 2026-11-07
+- **Status:** Accepted / Implemented
+- **Context:** Claude A's Batch 5 audit returned REJECT on `m2b-remediated-batch5-bundle.zip` (SHA-256 `e708153be0bbbef6cbe7962f1d3e497e1bceb40704cfcd241be1057eac83013c`), finding:
+  1. F1-A & F1-B (Critical): The closure-held dispatch mechanism used `object.__getattribute__` to recover `_dispatch`, and its closure exposed the raw client. Furthermore, mutating caller-supplied KiteConnect instances violated library contracts and broke legitimate reads.
+  2. F1-D (High): Keyring handling broke connector construction in environments without keyring backends.
+  3. F2-A, F2-B, F2-C (High): Calendar regression tests in Batch 5 lacked `exchange` identity; `complete=True` calendars silently inferred unexplained missing weekdays as holidays; contradictory calendar declarations (dates listed as both trading days and holidays, or special sessions with open >= close) were not rejected.
+  4. F3-A & F3-B (Medium): Secret scanning baseline was not version-pinned; exclusion regex was unanchored and masked `.github` and `.gitlab-ci.yml`.
+  5. T-1 (Medium): Integration tests substituted stubs instead of testing against genuine `kiteconnect==5.2.2`.
+- **Decisions:**
+  1. **Priority 1 (F1-A, F1-B, F1-D: Zerodha Read-Only Boundary Redesign):**
+     - Never mutate caller-supplied KiteConnect instances: callers' objects remain 100% unmutated.
+     - Slotted facade composition: `_ReadOnlyKiteWrapper` and `ZerodhaReadOnlyConnector` use `__slots__ = ("_target", "__weakref__")`. No `__dict__` exists; `vars()` and reflection fail closed.
+     - Transport-layer rejection: Implemented `ReadOnlyTransportAdapter(HTTPAdapter)` intercepting requests at the transport level to reject any non-GET request with `PermissionError`.
+     - Subclass protection: `ReadOnlyKiteConnect` mounts `ReadOnlyTransportAdapter` on `reqsession` and overrides `_request` to reject non-GET requests before transport.
+     - Bound method isolation: `_ReadOnlyKiteWrapper.__getattr__` returns methods bound via `types.MethodType` so that `wrapper.method.__self__ is wrapper`.
+     - Complete API surface audit: orders, autoslice orders, GTT, MF, MF SIP, convert_position, session mutation (`generate_session`, `renew_access_token`, `invalidate_access_token`, `invalidate_refresh_token`), and raw HTTP methods (`_post`, `_put`, `_delete`, `_request`) are rejected with `PermissionError` before transport.
+     - Keyring safety: safe token storage helpers catch backend errors gracefully; connector construction never crashes when keyring is unavailable or unconfigured.
+     - Honest boundaries: documented that in-process Python wrappers provide defense-in-depth and application safety, but true security requires restricted broker credentials and egress controls.
+  2. **Priority 2 (F2-A, F2-B, F2-C: Calendar Contradiction Rejection & Completeness Contract):**
+     - Contradiction rejection in `ExchangeCalendar.__post_init__`: detects and raises `ValueError` on overlap between `trading_days` and `holidays`, special sessions on holidays, special sessions with `open >= close`, and special sessions with mismatched exchanges.
+     - Completeness contract: when `complete=True`, explicit holiday evidence is required for every omitted weekday. An unexplained missing weekday has no evidence (`has_evidence_for_date == False`) and is never verified as a non-trading day.
+     - Incomplete calendar fail-closed: sequences across unverified multi-day gaps fail closed with exact error code `MARKET_CALENDAR_REQUIRED` and coverage status `CoverageStatus.MARKET_CALENDAR_REQUIRED.value`.
+     - Tested across all four exchanges: NSE, BSE, NYSE, NASDAQ for both D1 and M5 sequences.
+  3. **Priority 3 (F3-A, F3-B: Secret Scanning Hardening):**
+     - Anchored exclusion regex `^(?:\.git/|\.venv(?:311)?/|\.ruff_cache/|\.pytest_cache/|\.coverage$|htmlcov/|m2a-review\.patch$)` excludes only exact generated directories without matching `.github/` or `.gitlab-ci.yml`.
+     - Pin `detect-secrets==1.5.0` in CI with `.secrets.baseline` containing version 1.5.0 and zero unbaselined secrets.
+     - Verified detection of dummy AWS secrets across `.github/workflows/leak.yml`, `.github/leak.txt`, `.gitlab-ci.yml`, `src/leak.py`, `.env`, and nested ZIP files.
+  4. **Priority 4 & Integration Hardening (T-1):**
+     - Genuine `kiteconnect==5.2.2`, `keyring==25.7.0`, `requests==2.34.2`, `pytest-cov`, and `ruff` verified in Python 3.11 (`.venv311`) and Python 3.14 (`.venv`).
+     - Added 20 comprehensive regression tests in `tests/test_claude_batch6_regressions.py`.
+     - Verified genuine KiteConnect integration with intercepted transport in `tests/test_zerodha_kiteconnect_integration.py`.
+     - All 310 tests pass across the entire suite with 85.49% test coverage on both Python 3.11.9 and Python 3.14.4.
