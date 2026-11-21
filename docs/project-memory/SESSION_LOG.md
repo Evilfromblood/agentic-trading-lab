@@ -270,3 +270,96 @@ Append concise entries in reverse chronological order. Record verified outcomes,
      - Python compileall passed with zero errors on both interpreters.
      - `detect-secrets-hook` passed with zero errors across all tracked files.
      - `pip-audit` passed with zero known vulnerabilities.
+
+
+## 2026-11-22 — Session: M2b Remediation Batch 7 Implementation & Verification
+
+- **Task:** Remediate all 7 confirmed technical defects (D1–D7) from Claude's Batch 6 independent audit.
+- **Specialist Sequence:** `agency-security-architect` -> `agency-backend-architect` -> `agency-reality-checker` -> `agency-code-reviewer`.
+- **Files Modified:**
+  - `v3-zerodha/src/agentic_trading/zerodha_connector.py`
+  - `src/agentic_trading/market_data/ingestion.py`
+  - `src/agentic_trading/market_data/models.py`
+  - `pyproject.toml`
+  - `requirements.lock`
+  - `.github/workflows/ci.yml`
+  - `.secrets.baseline`
+  - `tests/test_claude_batch1_regressions.py`
+  - `tests/test_claude_batch4_regressions.py`
+  - `tests/test_claude_batch6_regressions.py`
+  - `tests/test_market_data_ingestion.py`
+  - `tests/test_claude_batch7_regressions.py` (new)
+  - `docs/project-memory/DECISION_LOG.md` (ADR-018)
+  - `docs/project-memory/CURRENT_STATE.md`
+  - `docs/project-memory/ISSUES_AND_RISKS.md`
+  - `docs/project-memory/NEXT_ACTIONS.md`
+  - `docs/project-memory/SESSION_LOG.md`
+  - `AUDIT_BRIEF.md`
+- **Actions Taken:**
+  1. **D1 (Hide raw client completely):**
+     - Removed `_target` from `__slots__` on `_ReadOnlyKiteWrapper` and `ZerodhaReadOnlyConnector` (`__slots__ = ("__weakref__",)` only).
+     - Stored underlying clients strictly in closure-encapsulated `WeakKeyDictionary` registries with zero instance attributes, zero slots, and zero module-level dictionaries.
+     - Enforced `PermissionError` in `__getattribute__` for `_target`, `_client`, `__client`, `_raw_client`, `_dispatch`, `__dict__`, and `reqsession`.
+     - Bound allowlisted read methods via `types.MethodType(bound_call, self)` ensuring `method.__self__ is wrapper`.
+     - Preserved caller-supplied `KiteConnect` instances 100% unmutated.
+  2. **D2 & D3 (Uniform session-mutation blocking):**
+     - Removed `generate_session`, `renew_access_token`, `invalidate_access_token`, `invalidate_refresh_token`, and `set_access_token` from `_READ_ONLY_ALLOWLIST` and added to `_BLOCKED_METHODS`.
+     - Made `ZerodhaReadOnlyConnector.complete_login` consistently fail closed with `PermissionError`.
+     - Updated previous tests to assert fail-closed behavior.
+  3. **D4 (In-memory token bypass for locked keyrings):**
+     - Updated `_require_session()` to verify in-memory `access_token` on the client first; read methods execute cleanly without querying keyring.
+     - Keyring is queried only when no in-memory token exists, catching backend errors as `KiteConfigurationError` without swallowing `KeyboardInterrupt` or `SystemExit`.
+  4. **D5 (Ingestion error code alignment):**
+     - When `ingest_historical` encounters missing intermediate trading days (`MISSING_INTERVAL`), set both `coverage_status = "TRUNCATED_COVERAGE"` and `error_code = "TRUNCATED_COVERAGE"`.
+     - Updated `ExchangeCalendar` docstring in `models.py` to clarify that unlisted weekdays do NOT count as non-trading days without explicit holiday evidence.
+  5. **D6 & D7 (Secret scanning & dependency pinning):**
+     - Removed `is_lock_file` filter from `.secrets.baseline` so lockfiles are actively scanned.
+     - Removed stray `# pragma: allowlist secret` comment from `.github/workflows/ci.yml`.
+     - Added `requests>=2.32.0` in `pyproject.toml`.
+     - Populated `requirements.lock` with exact verified pins (`kiteconnect==5.2.2`, `keyring==25.7.0`, `requests==2.34.2`, `ruff==0.17.3`, `pytest==9.2.0`, `pytest-cov==7.1.0`, `detect-secrets==1.5.0`).
+     - Updated CI to install from `requirements.lock`.
+  6. **Verification Evidence:**
+     - Full test suite: **327 passed in 1.98s** on Python 3.11.9 (`.venv311`) and **327 passed in 0.89s** on Python 3.14.4 (`.venv`).
+     - Test coverage: **85.55%** (exceeding mandatory 85% threshold with `--cov-fail-under=85`).
+     - Generated separate test reports: `python311_verification_report.txt`, `python314_verification_report.txt`.
+     - Ruff check passed with zero errors (`All checks passed!`).
+     - Python compileall passed with zero errors on both interpreters.
+     - `detect-secrets-hook` passed with zero errors across all tracked files, actively scanning `requirements.lock`.
+     - `pip-audit` passed with zero known vulnerabilities.
+
+
+## 2026-11-22 — Session: M2b Remediation Batch 7b Polish & Packaging
+
+- **Task:** Remediate two targeted findings (F1, F3) from Claude's verification review of the Zerodha read-only boundary.
+- **Files Modified:**
+  - `v3-zerodha/src/agentic_trading/zerodha_connector.py`
+  - `tests/test_claude_batch7_regressions.py`
+  - `tests/test_claude_batch4_regressions.py`
+  - `docs/project-memory/BATCH7B_VERIFICATION.md` (new)
+  - `docs/project-memory/DECISION_LOG.md` (ADR-019)
+  - `docs/project-memory/CURRENT_STATE.md`
+  - `docs/project-memory/ISSUES_AND_RISKS.md` (R-034, R-035)
+  - `docs/project-memory/NEXT_ACTIONS.md`
+  - `docs/project-memory/SESSION_LOG.md`
+  - `AUDIT_BRIEF.md`
+- **Actions Taken:**
+  1. **F1 (Zero mutation of caller-injected clients):**
+     - Stored `(client, injected: bool)` tuple in closure-encapsulated `_connector_registry`.
+     - In `_require_session()`: if `injected` is True, verified `raw_client.access_token` is already a non-empty string; if missing/empty, raises `KiteConfigurationError("Injected client must be pre-authenticated with an active access_token")` without calling `set_access_token()` or querying keyring.
+     - In `logout()`: if `injected` is True, deleted only local keyring token and left caller client completely untouched.
+     - Injected genuine `KiteConnect.__dict__` and `reqsession.headers` verified identical before and after wrapping, reading, and `logout()`.
+  2. **F3 (Block POST margin/contract-note endpoints):**
+     - Removed `order_margins`, `basket_order_margins`, and `get_virtual_contract_note` from `_READ_ONLY_ALLOWLIST` and added to `_BLOCKED_METHODS`.
+     - Added explicit method overrides on `ReadOnlyKiteConnect`, `_ReadOnlyKiteWrapper`, and `ZerodhaReadOnlyConnector` raising `PermissionError` before transport.
+     - Added messages in `_OPERATION_MESSAGES`.
+  3. **Regression Tests:**
+     - Added 11 new tests in `tests/test_claude_batch7_regressions.py` covering F1, F3, and wrapper edge cases.
+     - Total tests in suite: **338 passed** across both Python 3.11.9 (`.venv311`) and Python 3.14.4 (`.venv`).
+     - Test coverage: **85.02%** (exceeds `--cov-fail-under=85`).
+  4. **Quality Gates:**
+     - Ruff check: 0 errors (`All checks passed!`).
+     - Compileall: 0 errors on both 3.11 and 3.14.
+     - detect-secrets hook: 0 unbaselined leaks across all tracked files, scanning `requirements.lock`.
+     - pip-audit: 0 known vulnerabilities.
+  5. **Packaging:**
+     - Packaged `m2b-remediated-batch7b-bundle.zip` in parent directory and computed SHA-256 hash.

@@ -346,13 +346,13 @@ class ExchangeCalendar:
     - An empty calendar (no trading_days, no holidays, no special_sessions, complete=False) has no evidence.
     - A partial calendar (complete=False) provides explicit evidence ONLY for dates explicitly listed in
       `holidays`, `special_sessions`, or `trading_days`. Unlisted weekdays have no evidence (missing evidence
-      fails closed). Year-level inference from unrelated holidays is strictly prohibited.
+      fails closed and returns has_evidence_for_date == False). Year-level inference from unrelated holidays is strictly prohibited.
     - A complete calendar (complete=True) provides authoritative evidence across its explicit coverage window
       `[coverage_start, coverage_end]`. Any weekday not in `holidays` is verified as a trading day.
-      Any weekend not in `special_sessions` or date in `holidays` is verified as a non-trading day.
+      Unlisted weekdays do not count as verified non-trading days; explicit holiday evidence is required
+      for omitted weekdays. Any weekend not in `special_sessions` or date in `holidays` is verified as a non-trading day.
     - If `trading_days` is explicitly specified, any date in `trading_days` is a verified trading day;
-      within `[coverage_start, coverage_end]` (or `[min(trading_days), max(trading_days)]`), any unlisted date
-      is a verified non-trading day.
+      unlisted weekdays do not count as verified non-trading days without explicit holiday evidence.
     """
 
     exchange: Exchange

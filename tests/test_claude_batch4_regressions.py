@@ -535,9 +535,12 @@ def test_h1_all_twenty_allowlisted_methods_callable_and_safe() -> None:
     assert wrapper.mf_holdings() == {"mf_holdings": "success"}
     assert wrapper.get_gtts() == {"get_gtts": "success"}
     assert wrapper.get_gtt(123) == {"get_gtt": "success"}
-    assert wrapper.generate_session("token", api_secret="secret") == {"access_token": "mock_token"}  # pragma: allowlist secret
-    assert wrapper.set_access_token("token") is None
-    assert wrapper.invalidate_access_token("token") is None
+    with pytest.raises(PermissionError):
+        wrapper.generate_session("token", api_secret="secret")
+    with pytest.raises(PermissionError):
+        wrapper.set_access_token("token")
+    with pytest.raises(PermissionError):
+        wrapper.invalidate_access_token("token")
     assert wrapper.login_url() == "https://kite.zerodha.com/connect/login"
 
     # Order calls must remain strictly 0
@@ -547,6 +550,7 @@ def test_h1_all_twenty_allowlisted_methods_callable_and_safe() -> None:
 def test_h1_connector_read_methods_with_session() -> None:
     """Verify connector read operations (profile, holdings, positions, margins, logout) with session."""
     stub = InstrumentedStubKite()
+    stub.access_token = "valid_session_token"
     mock_keyring = MagicMock()
     mock_keyring.get_password.return_value = "valid_session_token"
 
@@ -558,12 +562,12 @@ def test_h1_connector_read_methods_with_session() -> None:
             assert connector.positions() == {"positions": "success"}
             assert connector.margins() == {"margins": "success"}
 
-            # complete_login
+            # complete_login fails closed in read-only mode
             os.environ["KITE_API_SECRET"] = "mock_secret"  # pragma: allowlist secret
-            login_res = connector.complete_login("mock_request_token")
-            assert "login_time" in login_res
+            with pytest.raises(PermissionError):
+                connector.complete_login("mock_request_token")
 
-            # logout
+            # logout of injected client only clears keyring; does not mutate stub
             connector.logout()
             mock_keyring.delete_password.assert_called()
         finally:
@@ -580,16 +584,16 @@ def test_h1_connector_session_required_raises_without_token() -> None:
 
     with patch.dict("sys.modules", {"keyring": mock_keyring}):
         connector = ZerodhaReadOnlyConnector(api_key="TEST", client=stub)
-        with pytest.raises(KiteConfigurationError, match="Not authenticated"):
+        with pytest.raises(KiteConfigurationError, match="pre-authenticated"):
             connector.profile()
 
-        with pytest.raises(KiteConfigurationError, match="Not authenticated"):
+        with pytest.raises(KiteConfigurationError, match="pre-authenticated"):
             connector.holdings()
 
-        with pytest.raises(KiteConfigurationError, match="Not authenticated"):
+        with pytest.raises(KiteConfigurationError, match="pre-authenticated"):
             connector.positions()
 
-        with pytest.raises(KiteConfigurationError, match="Not authenticated"):
+        with pytest.raises(KiteConfigurationError, match="pre-authenticated"):
             connector.margins()
 
 

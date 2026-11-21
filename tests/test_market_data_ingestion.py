@@ -2528,7 +2528,7 @@ def test_coverage_missing_middle_candle_check_gaps_true() -> None:
 
     res = pipeline.ingest_historical(req, now=eval_now, require_full_coverage=False, check_gaps=True)
     assert res.success is False
-    assert res.error_code == "QUALITY_GATE_REJECTED"
+    assert res.error_code == "TRUNCATED_COVERAGE"
     assert res.coverage_status == "TRUNCATED_COVERAGE"
     assert res.validation_result is not None
     assert res.validation_result.has_error(DataQualityErrorCode.MISSING_INTERVAL)

@@ -264,3 +264,41 @@ Last reviewed: 2026-11-02
 5. **Test Coverage & Quality Enforcement:**
    - All 310 tests pass across the entire suite with 85.49% test coverage on both Python 3.11.9 and Python 3.14.4.
    - Ruff linting and compileall pass cleanly.
+
+
+## M2b Batch 7 Remediated Audit Findings (Resolved in Working Tree)
+
+### R-028 — Finding D1: Raw client exposure via slot descriptor `_target`
+- Status: Resolved.
+- Fix: Removed `_target` from `__slots__` on `_ReadOnlyKiteWrapper` and `ZerodhaReadOnlyConnector` (`__slots__ = ("__weakref__",)` only). Injected and default clients are stored strictly inside closure-encapsulated `WeakKeyDictionary` registries with zero instance attributes, zero slots, and zero module-level dictionaries. `__getattribute__` blocks access to `_target`, `_client`, `__client`, `_raw_client`, `_dispatch`, `__dict__`, and `reqsession` with `PermissionError`. Bound methods returned via `types.MethodType(bound_call, self)` ensure `method.__self__ is wrapper`. Injected caller `KiteConnect` instances remain 100% unmutated.
+
+### R-029 — Finding D2 & D3: Inconsistent session-mutation blocking & complete_login
+- Status: Resolved.
+- Fix: Removed `generate_session`, `renew_access_token`, `invalidate_access_token`, `invalidate_refresh_token`, and `set_access_token` from `_READ_ONLY_ALLOWLIST` and placed into `_BLOCKED_METHODS`. Both default and injected clients raise `PermissionError` before transport. `complete_login` consistently fails closed with `PermissionError` in read-only mode.
+
+### R-030 — Finding D4: Keyring lock crashing in-memory authenticated sessions
+- Status: Resolved.
+- Fix: `_require_session()` checks if the underlying client already holds a non-empty `access_token` in memory; if present, read operations proceed without querying keyring. Keyring is queried only when no in-memory token exists, catching backend failures as `KiteConfigurationError` without swallowing `KeyboardInterrupt` or `SystemExit`.
+
+### R-031 — Finding D5: Ingestion error code mismatch & calendar docstring
+- Status: Resolved.
+- Fix: When `ingest_historical` encounters missing intermediate trading days (`MISSING_INTERVAL`), it sets both `coverage_status = "TRUNCATED_COVERAGE"` and `error_code = "TRUNCATED_COVERAGE"`. Updated `ExchangeCalendar` docstring in `models.py` to clarify that unlisted weekdays do NOT count as non-trading days without explicit holiday evidence.
+
+### R-032 — Finding D6: Secret scanner skipping lockfiles & CI stray comment
+- Status: Resolved.
+- Fix: Removed `{"path": "detect_secrets.filters.heuristic.is_lock_file"}` from `filters_used` in `.secrets.baseline` so lockfiles are actively scanned. Removed stray `# pragma: allowlist secret` comment from `.github/workflows/ci.yml`.
+
+### R-033 — Finding D7: Missing requests dependency & unpinned lockfile
+- Status: Resolved.
+- Fix: Added `"requests>=2.32.0"` to optional dependencies in `pyproject.toml`. Populated `requirements.lock` with exact verified pins (`kiteconnect==5.2.2`, `keyring==25.7.0`, `requests==2.34.2`, `ruff==0.17.3`, `pytest==9.2.0`, `pytest-cov==7.1.0`, `detect-secrets==1.5.0`). Updated CI to install from `requirements.lock`.
+
+
+## M2b Batch 7b Remediated Audit Findings (Resolved in Working Tree)
+
+### R-034 — Finding F1: Injected KiteConnect mutation in _require_session() and logout()
+- Status: Resolved.
+- Fix: Injected client stored with boolean flag in closure dictionary; `_require_session()` fails closed with `KiteConfigurationError` if `access_token` missing/empty without mutating client; `logout()` leaves injected client object and headers completely untouched.
+
+### R-035 — Finding F3: HTTP POST margin and contract note methods permitted in read-only allowlist
+- Status: Resolved.
+- Fix: Removed `order_margins`, `basket_order_margins`, and `get_virtual_contract_note` from `_READ_ONLY_ALLOWLIST`, added to `_BLOCKED_METHODS`, with explicit stubs on `ReadOnlyKiteConnect`, `_ReadOnlyKiteWrapper`, and `ZerodhaReadOnlyConnector` raising `PermissionError` before transport.

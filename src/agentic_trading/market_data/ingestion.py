@@ -1244,7 +1244,7 @@ class MarketDataIngestionPipeline:
                 err_code = "MARKET_CALENDAR_REQUIRED"
             elif is_boundary_truncated or val_res.has_error(DataQualityErrorCode.MISSING_INTERVAL) or skipped_weekday:
                 failure_coverage = CoverageStatus.TRUNCATED_COVERAGE.value
-                err_code = "QUALITY_GATE_REJECTED"
+                err_code = "TRUNCATED_COVERAGE"
             elif has_calendar_required or val_res.has_error(DataQualityErrorCode.MARKET_CALENDAR_REQUIRED):
                 failure_coverage = CoverageStatus.MARKET_CALENDAR_REQUIRED.value
                 err_code = "MARKET_CALENDAR_REQUIRED"

@@ -145,3 +145,32 @@ Append decisions; do not silently rewrite historical decisions. Mark superseded 
      - Added 20 comprehensive regression tests in `tests/test_claude_batch6_regressions.py`.
      - Verified genuine KiteConnect integration with intercepted transport in `tests/test_zerodha_kiteconnect_integration.py`.
      - All 310 tests pass across the entire suite with 85.49% test coverage on both Python 3.11.9 and Python 3.14.4.
+
+## ADR-018 (Batch 7) — Closure Encapsulation, Uniform Mutation Blocking, and Secret Scanning of Lockfiles
+- **Status:** Accepted (2026-11-22)
+- **Context:** Claude's Batch 6 independent audit reported 7 actionable defects:
+  1. D1 (Critical): Injected client slot descriptor access (`_target`) allowed callers to bypass read-only facade.
+  2. D2 & D3 (High): Inconsistent session-mutation blocking; `generate_session`, `set_access_token`, and `complete_login` allowed credential modifications.
+  3. D4 (High): Keyring backend failures crashed read operations even when client held valid in-memory token.
+  4. D5 (High): Ingestion error code returned `QUALITY_GATE_REJECTED` instead of `TRUNCATED_COVERAGE` on missing intermediate trading days; calendar docstring was misaligned.
+  5. D6 (Medium): Secret scanning baseline heuristic filtered lockfiles, skipping `requirements.lock`.
+  6. D7 (Medium): Optional dependencies missed `requests`; `requirements.lock` lacked concrete pins.
+- **Decisions:**
+  1. **D1 (Hide raw client completely):** Removed `_target` from `__slots__` (`__slots__ = ("__weakref__",)` only). Store underlying clients strictly inside closure-encapsulated `WeakKeyDictionary` registries with zero instance attributes, zero slots, and zero module-level dictionaries. `__getattribute__` blocks `_target`, `_client`, `__client`, `_raw_client`, `_dispatch`, `__dict__`, and `reqsession` with `PermissionError`. Bound methods returned via `types.MethodType(bound_call, self)` ensure `method.__self__ is wrapper`. Caller-injected `KiteConnect` instances remain 100% unmutated.
+  2. **D2 & D3 (Session mutation blocking):** Removed `generate_session`, `renew_access_token`, `invalidate_access_token`, `invalidate_refresh_token`, and `set_access_token` from `_READ_ONLY_ALLOWLIST` and added to `_BLOCKED_METHODS`. Both default and injected clients raise `PermissionError`. `complete_login` fails closed with `PermissionError`.
+  3. **D4 (In-memory token bypass):** `_require_session()` checks `access_token` on client first without touching keyring; queries keyring only when no in-memory token exists, catching backend failures cleanly as `KiteConfigurationError` without swallowing `KeyboardInterrupt` or `SystemExit`.
+  4. **D5 (Ingestion error code alignment):** `ingest_historical` sets `error_code = "TRUNCATED_COVERAGE"` and `coverage_status = "TRUNCATED_COVERAGE"` on `MISSING_INTERVAL`. `ExchangeCalendar` docstring updated to reflect that unlisted weekdays do NOT count as verified non-trading days without explicit holiday evidence.
+  5. **D6 & D7 (Secret scanning & dependency pinning):** Removed `is_lock_file` filter from `.secrets.baseline`. Added `requests>=2.32.0` in `pyproject.toml`. Populated `requirements.lock` with exact pins (`kiteconnect==5.2.2`, `keyring==25.7.0`, `requests==2.34.2`, `ruff==0.17.3`, `pytest==9.2.0`, `pytest-cov==7.1.0`, `detect-secrets==1.5.0`). CI installs pinned lockfile.
+  6. **Verification:** 327 passed in 1.98s on Python 3.11 with 85.55% test coverage and 327 passed in 0.89s on Python 3.14.
+
+
+## ADR-019 (Batch 7b) — Injected Client Zero-Mutation Guarantee and POST Margin Endpoint Blocking
+- **Status:** Accepted (2026-11-22)
+- **Context:** Claude's verification identified two final boundary findings in `v3-zerodha/src/agentic_trading/zerodha_connector.py`:
+  1. F1: `_require_session()` and `logout()` could mutate caller-injected `KiteConnect` clients (`access_token` and `reqsession.headers`).
+  2. F3: `order_margins`, `basket_order_margins`, and `get_virtual_contract_note` execute HTTP POST (`_post`) in `kiteconnect==5.2.2`, violating the read-only transport invariant.
+- **Decisions:**
+  1. **F1 (Zero Mutation):** Store `(client, injected: bool)` in the closure-encapsulated registry. In `_require_session()`, if `injected` is True, verify non-empty `access_token` on the client; if missing, raise `KiteConfigurationError("Injected client must be pre-authenticated with an active access_token")` without mutating or querying keyring. In `logout()`, if `injected` is True, delete only keyring token and leave caller client completely untouched.
+  2. **F3 (Block POST Endpoints):** Remove `order_margins`, `basket_order_margins`, and `get_virtual_contract_note` from `_READ_ONLY_ALLOWLIST` and add to `_BLOCKED_METHODS`. Add explicit method overrides on `ReadOnlyKiteConnect`, `_ReadOnlyKiteWrapper`, and `ZerodhaReadOnlyConnector` raising `PermissionError` before transport.
+- **Consequences:** Injected clients remain 100% immutable across wrapping, session checks, and logout. All POST-based margin and contract note methods fail closed with `PermissionError`.
+- **Verification:** 338 tests pass across the suite with 85.02% coverage on Python 3.11 and Python 3.14.

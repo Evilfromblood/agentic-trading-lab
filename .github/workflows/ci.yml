@@ -30,6 +30,7 @@ jobs:
       - name: Upgrade pip and install package
         run: |
           python -m pip install --upgrade pip
+          python -m pip install -r requirements.lock
           python -m pip install -e ".[dev,zerodha-readonly]"
 
       - name: Byte-compile source and tests
@@ -47,6 +48,6 @@ jobs:
           python -m pip_audit
 
       - name: Secret scanning
-        run: | # pragma: allowlist secret
+        run: |
           python -m pip install detect-secrets==1.5.0
           git ls-files -z | xargs -0 detect-secrets-hook --baseline .secrets.baseline

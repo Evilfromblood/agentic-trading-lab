@@ -1,23 +1,9 @@
-# Dependency Architecture and Reproducibility Specification
+# Pinned Dependency Specification
 # Milestone 2b (Agentic Trading Lab)
-#
-# Core Runtime Architecture:
-# The core package (src/agentic_trading) has ZERO external third-party runtime
-# dependencies (dependencies = [] in pyproject.toml). It relies strictly on Python's
-# standard library (decimal, datetime, zoneinfo, dataclasses, enum, typing, weakref).
-#
-# Development & Quality Verification Tooling:
-# Tooling dependencies are specified in pyproject.toml under [project.optional-dependencies]
-# dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff==0.17.3"]
-#
-# Integration Adapters (Optional Ecosystem Dependencies):
-# - zerodha-readonly: ["kiteconnect>=5.0.1", "fastapi>=0.115", "uvicorn[standard]>=0.30", "keyring>=25"]
-# - market: ["yfinance>=0.2.40", "pandas>=2.2"]
-# - providers: ["openai>=1.40", "anthropic>=0.34", "google-genai>=1.0"]
-#
-# Reproducibility and CI Policy:
-# - All CI pipelines enforce genuine pytest execution across Python 3.11-3.14.
-# - 85%+ genuine test coverage threshold enforced via pytest-cov (--cov-fail-under=85).
-# - Strict Ruff linting and byte-compilation across all source and test directories.
-# - Blocking dependency vulnerability auditing via pip-audit.
-# - Automated secret scanning.
+kiteconnect==5.2.2
+keyring==25.7.0
+requests==2.34.2
+ruff==0.17.3
+pytest==9.2.0
+pytest-cov==7.1.0
+detect-secrets==1.5.0

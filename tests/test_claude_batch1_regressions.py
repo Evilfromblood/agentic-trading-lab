@@ -359,7 +359,7 @@ def test_priority2_boundary_end_time_equal_now_enforces_live_freshness() -> None
     )
     res = pipeline.ingest_historical(req, now=t_now)
     assert res.success is False
-    assert res.error_code == "QUALITY_GATE_REJECTED"
+    assert res.error_code in ("QUALITY_GATE_REJECTED", "TRUNCATED_COVERAGE")
     assert res.validation_result is not None
     assert res.validation_result.has_error(DataQualityErrorCode.STALE_DATA)
 

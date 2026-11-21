@@ -160,7 +160,8 @@ def test_p1_injected_genuine_kiteconnect_client_remains_unmutated() -> None:
 
     # Wrapper is a separate object, not mutating raw client
     assert wrapper is not raw
-    assert wrapper._target is raw
+    with pytest.raises(PermissionError):
+        _ = wrapper._target
 
     # Raw methods and attributes on caller client remain completely unchanged
     assert raw.place_order.__func__ is orig_place_order.__func__
