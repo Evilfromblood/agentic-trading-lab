@@ -40,6 +40,7 @@ class CorporateAction:
     adjustment_factor: Decimal = Decimal("1")
     cash_amount: Money | None = None
     new_symbol: str | None = None
+    announcement_date: date | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.exchange, Exchange):
@@ -55,6 +56,14 @@ class CorporateAction:
 
         if not isinstance(self.effective_date, date):
             raise TypeError(f"effective_date must be a date, got {type(self.effective_date).__name__}")
+
+        if self.announcement_date is not None:
+            if not isinstance(self.announcement_date, date):
+                raise TypeError(f"announcement_date must be a date, got {type(self.announcement_date).__name__}")
+            if self.announcement_date > self.effective_date:
+                raise ValueError(
+                    f"announcement_date ({self.announcement_date}) cannot be after effective_date ({self.effective_date})"
+                )
 
         if (
             isinstance(self.adjustment_factor, (bool, float))
@@ -108,24 +117,36 @@ def resolve_symbol_lineage(
     ]
 
     adj: dict[str, set[str]] = {}
+    undirected: dict[str, set[str]] = {}
     for act in relevant_actions:
         assert act.new_symbol is not None
         adj.setdefault(act.symbol, set()).add(act.new_symbol)
+        undirected.setdefault(act.symbol, set()).add(act.new_symbol)
+        undirected.setdefault(act.new_symbol, set()).add(act.symbol)
+
+    component_nodes: set[str] = set()
+    frontier = [clean_symbol]
+    while frontier:
+        curr = frontier.pop()
+        if curr not in component_nodes:
+            component_nodes.add(curr)
+            frontier.extend(undirected.get(curr, set()) - component_nodes)
 
     visited_dfs: dict[str, int] = {}
 
     def detect_cycle(node: str) -> bool:
         visited_dfs[node] = 1
         for nbr in adj.get(node, ()):
-            if visited_dfs.get(nbr, 0) == 1:
-                return True
-            if visited_dfs.get(nbr, 0) == 0 and detect_cycle(nbr):
-                return True
+            if nbr in component_nodes:
+                if visited_dfs.get(nbr, 0) == 1:
+                    return True
+                if visited_dfs.get(nbr, 0) == 0 and detect_cycle(nbr):
+                    return True
         visited_dfs[node] = 2
         return False
 
-    for node in list(adj.keys()):
-        if visited_dfs.get(node, 0) == 0:
+    for node in component_nodes:
+        if node in adj and visited_dfs.get(node, 0) == 0:
             if detect_cycle(node):
                 raise ValueError(f"Cyclic symbol change detected involving symbol '{node}'")
 
@@ -170,8 +191,12 @@ def adjust_candles_for_corporate_actions(
     candles: Sequence[Candle],
     actions: Sequence[CorporateAction],
     tick_size: Decimal | None = None,
+    as_of_date: date | None = None,
 ) -> tuple[Candle, ...]:
     """Adjust historical candles for corporate actions (splits, bonuses, dividends)."""
+    if as_of_date is not None and not isinstance(as_of_date, date):
+        raise TypeError(f"as_of_date must be a date, got {type(as_of_date).__name__}")
+
     if tick_size is not None:
         if (
             isinstance(tick_size, (bool, float))
@@ -191,14 +216,16 @@ def adjust_candles_for_corporate_actions(
             if act.exchange == candle.exchange
             and act.symbol == candle.symbol
             and act.effective_date > candle_date
+            and (as_of_date is None or (act.announcement_date or act.effective_date) <= as_of_date)
         ]
+        matching_actions = list(dict.fromkeys(matching_actions))
 
         if not matching_actions:
             if tick_size is not None:
-                q_open = candle.open.quantize(tick_size, rounding=ROUND_HALF_EVEN)
-                q_high = candle.high.quantize(tick_size, rounding=ROUND_HALF_EVEN)
-                q_low = candle.low.quantize(tick_size, rounding=ROUND_HALF_EVEN)
-                q_close = candle.close.quantize(tick_size, rounding=ROUND_HALF_EVEN)
+                q_open = (candle.open / tick_size).to_integral_value(rounding=ROUND_HALF_EVEN) * tick_size
+                q_high = (candle.high / tick_size).to_integral_value(rounding=ROUND_HALF_EVEN) * tick_size
+                q_low = (candle.low / tick_size).to_integral_value(rounding=ROUND_HALF_EVEN) * tick_size
+                q_close = (candle.close / tick_size).to_integral_value(rounding=ROUND_HALF_EVEN) * tick_size
                 q_high = max(q_high, q_open, q_close)
                 q_low = min(q_low, q_open, q_close)
                 adjusted_candles.append(
@@ -233,10 +260,10 @@ def adjust_candles_for_corporate_actions(
         adj_close = candle.close * cum_factor
 
         if tick_size is not None:
-            adj_open = adj_open.quantize(tick_size, rounding=ROUND_HALF_EVEN)
-            adj_high = adj_high.quantize(tick_size, rounding=ROUND_HALF_EVEN)
-            adj_low = adj_low.quantize(tick_size, rounding=ROUND_HALF_EVEN)
-            adj_close = adj_close.quantize(tick_size, rounding=ROUND_HALF_EVEN)
+            adj_open = (adj_open / tick_size).to_integral_value(rounding=ROUND_HALF_EVEN) * tick_size
+            adj_high = (adj_high / tick_size).to_integral_value(rounding=ROUND_HALF_EVEN) * tick_size
+            adj_low = (adj_low / tick_size).to_integral_value(rounding=ROUND_HALF_EVEN) * tick_size
+            adj_close = (adj_close / tick_size).to_integral_value(rounding=ROUND_HALF_EVEN) * tick_size
 
         adj_high = max(adj_high, adj_open, adj_close)
         adj_low = min(adj_low, adj_open, adj_close)

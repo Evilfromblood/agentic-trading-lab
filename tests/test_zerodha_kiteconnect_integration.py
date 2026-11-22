@@ -53,3 +53,51 @@ def test_genuine_kite_mutations_are_rejected_before_transport(monkeypatch, name)
         else:
             getattr(facade, name)()
     assert transport_calls == []
+
+
+def test_readonly_kiteconnect_request_signature_and_methods(monkeypatch):
+    from agentic_trading.zerodha_connector import ReadOnlyKiteConnect
+
+    client = ReadOnlyKiteConnect(api_key="test-key")
+    requests: list[str] = []
+
+    def intercepted_request(method, *_args, **_kwargs):
+        requests.append(method)
+        return _Response()
+
+    monkeypatch.setattr(client.reqsession, "request", intercepted_request)
+
+    res = client._request("user.profile", "GET")
+    assert res == {"user_id": "read-only"}
+    assert requests == ["GET"]
+
+    with pytest.raises(PermissionError, match="HTTP method 'POST' is forbidden in read-only mode"):
+        client._request("order.place", "POST", params={"tradingsymbol": "INFY"})
+    assert requests == ["GET"]
+
+
+def test_injected_client_logout_leaves_keyring_and_client_intact(monkeypatch):
+    class FakeKeyring:
+        def __init__(self):
+            self.store = {connector_module.SERVICE_NAME: {connector_module.TOKEN_ACCOUNT: "secret-token"}}
+
+        def get_password(self, service, account):
+            return self.store.get(service, {}).get(account)
+
+        def set_password(self, service, account, value):
+            self.store.setdefault(service, {})[account] = value
+
+        def delete_password(self, service, account):
+            self.store.get(service, {}).pop(account, None)
+
+    fake_kr = FakeKeyring()
+    monkeypatch.setattr(connector_module, "keyring", fake_kr)
+
+    raw = KiteConnect(api_key="test-key")
+    raw.access_token = "injected-token"
+    connector = ZerodhaReadOnlyConnector(client=raw)
+
+    connector.logout()
+
+    assert fake_kr.get_password(connector_module.SERVICE_NAME, connector_module.TOKEN_ACCOUNT) == "secret-token"
+    assert raw.access_token == "injected-token"

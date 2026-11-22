@@ -1,7 +1,4 @@
-"""Deterministic, fail-closed risk checks for paper orders.
-
-This module intentionally has no broker or network dependencies.
-"""
+"""Core deterministic fail-closed paper order risk evaluation."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -71,9 +68,11 @@ def evaluate_order(proposal: OrderProposal) -> RiskDecision:
         reasons.append("INVALID_PRICE")
     if cash < 0 or equity <= 0:
         reasons.append("INVALID_PORTFOLIO_VALUES")
-    if (not isinstance(proposal.current_position_quantity, int)
-            or isinstance(proposal.current_position_quantity, bool)
-            or proposal.current_position_quantity < 0):
+    if (
+        not isinstance(proposal.current_position_quantity, int)
+        or isinstance(proposal.current_position_quantity, bool)
+        or proposal.current_position_quantity < 0
+    ):
         reasons.append("INVALID_EXISTING_POSITION")
     if not (Decimal("0") < max_position <= Decimal("1")):
         reasons.append("INVALID_POSITION_LIMIT")

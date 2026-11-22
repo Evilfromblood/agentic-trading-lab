@@ -2,6 +2,35 @@
 
 Append concise entries in reverse chronological order. Record verified outcomes, not intentions.
 
+## 2026-11-22 — M3 Hardening Batch A: Accounting Conservation, Tick-Grid Costs & Position-Aware Risk Gate
+- Implemented full M3 Hardening Batch A remediations across 4 core areas:
+  - **Accounting Ledger (`ledger.py`)**:
+    - Enforced semantic sign invariants on `DEPOSIT` (cash > 0, qty == 0), `WITHDRAWAL` (cash < 0, qty == 0), `BUY_FILL` (cash < 0, qty > 0, price > 0), `SELL_FILL` (cash > 0, qty < 0, price > 0), `FEE_CHARGE` (cash <= 0, qty == 0), and `DIVIDEND_CREDIT` (cash > 0, qty == 0).
+    - Computed `get_total_fees` as non-abs `-sum(...)`. Added `get_total_dividends`.
+  - **Portfolio Accounting (`portfolio.py`)**:
+    - Maintained `_realized_pnl_by_symbol` across full position exits, preserving cumulative realized PnL in snapshots and across re-entries.
+    - Implemented pre-populated ledger replay in `PortfolioEngine.__init__`.
+    - Enforced short selling boundary with `InsufficientPositionError` when `allow_short=False`, tracking signed market value and cover-to-flat PnL when `allow_short=True`.
+    - Added SELL fee overdraft prevention raising `InsufficientFundsError`.
+    - Added `apply_dividend` API ensuring exact decimal equality in accounting conservation invariant.
+  - **True Tick-Grid Quantization & Adverse Slippage (`costs.py`, `corporate_actions.py`)**:
+    - Replaced `.quantize(tick_size)` with true tick-grid rounding `(val / tick_size).to_integral_value(mode) * tick_size`.
+    - Implemented always-adverse slippage in `BasisPointsSlippageModel` (`ROUND_CEILING` on BUY, `ROUND_FLOOR` on SELL).
+    - Added strict parameter checks on prices, quantities, tick sizes, fee rates, and fee caps.
+  - **Position-Aware Risk Gate & Dead File Cleanup (`proposal_gate.py`, `risk_engine.py`)**:
+    - Implemented position-aware SELL checks (`UNAUTHORIZED_SHORT`, `INSUFFICIENT_POSITION`).
+    - Waived stop-loss requirement on de-risking SELL exits of held long positions.
+    - Permitted risk-reducing SELL exits during kill switch (daily loss and drawdown limits apply only to BUY).
+    - Added fail-closed validations for non-positive peak equity, entry price, stop loss, take profit, and limit price, and inverted directions even with `require_stop_loss=False`.
+    - Computed exact `max_allowed_quantity` floored to `lot_size`.
+    - Deleted stale dead file `src/agentic_trading/risk_engine.py`.
+  - **Verification & Zero `#` Comments**:
+    - Added 11 new adversarial tests in `tests/test_m3_simulation_and_risk.py` (total 27 tests).
+    - Full test suite: **389 passed in 2.54s** on Python 3.11 (.venv311) and **389 passed in 1.68s** on Python 3.14 (.venv).
+    - Test coverage: **87.18%** (exceeding `--cov-fail-under=85`).
+    - Ruff linting and compileall passed with 0 errors.
+    - Zero inline `#` comments verified across all new and edited M3 files.
+
 ## 2026-11-03 — M2b Remediation Batch 1: Claude A Independent Audit
 - Remediated all confirmed technical findings across 5 priorities from Claude A's independent adversarial audit:
   - **Priority 1 (Candle Integrity & Session Grid)**:
@@ -393,7 +422,7 @@ Append concise entries in reverse chronological order. Record verified outcomes,
      - Defined `FixtureManifest` with SHA-256 payload digest.
      - Implemented `save_replay_fixture` with canonical JSON serialization, path-traversal prevention, and atomic manifest generation.
      - Implemented `StoredReplayFixtureProvider` extending `MarketDataProvider`: cryptographically verifies raw payload integrity on load via `hmac.compare_digest` against manifest SHA-256 (raising `FixtureIntegrityError` on tampering or mismatch), and provides deterministic `[start_time, end_time)` window filtering.
-  4. **Adversarial Regression Tests (`test_m2c_cross_market_foundation.py`):**
+  5. **Adversarial Regression Tests (`test_m2c_cross_market_foundation.py`):**
      - 24 comprehensive tests covering currency arithmetic, instrument validation, duplicate prevention, corporate action price/volume adjustment, cyclic rename graph rejection, and replay fixture tampering/mismatch detection.
      - 0 inline `#` comments in all code and test files.
 - **Verification Evidence:**
@@ -403,3 +432,80 @@ Append concise entries in reverse chronological order. Record verified outcomes,
   - Python compileall: 0 errors on both Python 3.11 and 3.14.
   - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` clean (0 leaks).
   - Comment check: verified 0 `#` comment characters across all 5 new/edited files.
+
+
+## 2026-11-22 — Session: Milestone 3 (Append-Only Ledger, Multi-Currency Portfolio, Cost Models, Strategy Contracts & Deterministic Risk Gate)
+
+- **Task:** Implement Milestone 3 on `feature/reliable-foundation` sequentially across 5 specialist roles (`agency-backend-architect` -> `agency-ai-engineer` -> `agency-security-architect` -> `agency-reality-checker` -> `agency-code-reviewer`) adhering strictly to paper-only constraints and zero inline `#` comments.
+- **Files Created/Modified:**
+  - `src/agentic_trading/market_data/instruments.py` (updated: point-in-time listed/delisted date survivorship guards, `is_active_on`, `get_as_of`, `list_active_on`)
+  - `src/agentic_trading/market_data/corporate_actions.py` (updated: `announcement_date` validation, `as_of_date` look-ahead filtering)
+  - `src/agentic_trading/simulation/ledger.py` (new: strictly append-only `AccountingLedger` and immutable `LedgerEntry`)
+  - `src/agentic_trading/simulation/costs.py` (new: `IndiaEquityFeeModel`, `USEquityFeeModel`, `ZeroFeeModel`, `BasisPointsSlippageModel`)
+  - `src/agentic_trading/simulation/portfolio.py` (new: multi-currency `PortfolioEngine`, `Position`, `PortfolioSnapshot`, `InsufficientFundsError`)
+  - `src/agentic_trading/simulation/__init__.py` (new: simulation exports)
+  - `src/agentic_trading/strategy/contracts.py` (new: `SignalDirection`, `BarContext`, `Signal`, `TradeProposal`, `Strategy`)
+  - `src/agentic_trading/strategy/indicators.py` (new: pure deterministic `sma`, `ema`, `rsi`, `atr` with warmup checks)
+  - `src/agentic_trading/strategy/__init__.py` (new: strategy exports)
+  - `src/agentic_trading/risk_engine/core.py` (new: original `OrderProposal`, `Side`, `evaluate_order`, `RiskDecision`)
+  - `src/agentic_trading/risk_engine/proposal_gate.py` (new: `PortfolioRiskPolicy`, `ProposalRiskDecision`, authoritative `evaluate_trade_proposal`)
+  - `src/agentic_trading/risk_engine/__init__.py` (new: risk engine exports)
+  - `src/agentic_trading/risk_engine.py` (updated: module bridge for backward compatibility)
+  - `tests/test_m3_simulation_and_risk.py` (new: 16 comprehensive adversarial tests with zero `#` comments)
+  - `tests/test_import_boundaries.py` (updated: directory-aware risk engine boundary test)
+  - `docs/project-memory/AI_MASTER_CONTEXT.md` (new: master reconciled architectural context)
+  - `docs/project-memory/DECISION_LOG.md` (ADR-021)
+  - `docs/project-memory/CURRENT_STATE.md` (updated)
+  - `docs/project-memory/NEXT_ACTIONS.md` (updated)
+  - `docs/project-memory/SESSION_LOG.md` (updated)
+- **Actions Taken:**
+  1. **Point-in-Time Universe & Corporate Action Look-Ahead Guards (`instruments.py`, `corporate_actions.py`):**
+     - Added `listed_date`, `delisted_date`, `version`, and `is_active_on` to `Instrument`.
+     - Added `get_as_of` and `list_active_on` to `InstrumentRegistry`, raising `UnknownInstrumentError` for inactive instruments.
+     - Added `announcement_date` to `CorporateAction` and `as_of_date` filtering to `adjust_candles_for_corporate_actions`.
+  2. **Append-Only Accounting Ledger & Transaction Costs (`simulation/`):**
+     - Implemented `AccountingLedger` and immutable `LedgerEntry` with sequence ID monotonicity and causal timestamp enforcement.
+     - Implemented statutory `IndiaEquityFeeModel` (brokerage caps, STT, exchange txn fee, SEBI fee, stamp duty, GST) and `USEquityFeeModel` (commission min/cap, SEC fee, FINRA TAF).
+     - Implemented `BasisPointsSlippageModel` with tick_size quantization.
+     - Implemented `PortfolioEngine` guaranteeing strict accounting conservation: Deposits - Withdrawals + Realized PnL - Fees == Cash + Cost Basis of Open Positions.
+  3. **Strategy Contracts & Technical Indicators (`strategy/`):**
+     - Implemented `BarContext` with strict causal look-ahead guard rejecting future bar closes (`candle.close_time > decision_time`).
+     - Defined `SignalDirection`, `Signal`, `TradeProposal`, and `Strategy` ABC.
+     - Implemented pure deterministic `sma`, `ema`, `rsi`, and `atr` functions with explicit warmup checks.
+  4. **Authoritative Deterministic Risk Gate (`risk_engine/`):**
+     - Packaged risk engine into `core` and `proposal_gate`.
+     - Implemented `evaluate_trade_proposal` failing closed on currency mismatches, lot size violations, missing/reversed stop-losses, per-trade risk limits, concentration caps, total exposure limits, daily loss limits, and drawdown circuit breakers.
+  5. **Adversarial Verification:**
+     - 16 adversarial tests in `tests/test_m3_simulation_and_risk.py` with zero inline `#` comments.
+- **Verification Evidence:**
+  - Full pytest suite: **378 passed in 2.99s** on Python 3.11.9 (`.venv311`) and **378 passed in 2.07s** on Python 3.14.4 (`.venv`).
+  - Total test coverage: **87.89%** (exceeds mandatory 85% requirement with `--cov-fail-under=85`).
+  - Ruff check: clean (0 errors) across all packages and tests.
+  - Python compileall: 0 errors on both Python 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` clean (0 leaks).
+  - Comment check: verified 0 `#` comment characters across all M3 files.
+
+## 2026-11-22 — M3 Hardening Batch B: Replay Fixture Integrity, BarContext Guards & Zerodha Transport Hardening
+- **Task:** Implement Milestone 3 Hardening Batch B covering findings H5, H6, H7, L7, M7, M8, M9, L3, L4, L5, and L8 across 4 specialist roles (`agency-security-architect` -> `agency-backend-architect` -> `agency-reality-checker` -> `agency-code-reviewer`).
+- **Files Modified:**
+  - `src/agentic_trading/market_data/replay_fixtures.py`: H5 historical filter mismatch returns empty records; H6 close-time window slicing (`close_time <= end_time` and `close_time <= now`) preventing look-ahead of in-progress bars; H7 & L7 keyed HMAC-SHA256 (`_compute_fixture_hmac`) covering canonical manifest metadata + payload, `overwrite=False` raising `FixtureIntegrityError`, `allow_nan=False` serialization, manifest field validation, and fail-closed missing timestamp detection (`ProviderPayloadError`).
+  - `src/agentic_trading/strategy/contracts.py`: M7 `BarContext.__post_init__` enforcing strictly increasing bar timestamps, uniform intervals, positive OHLC prices, high/low bounds (`high >= max(open, close)` and `low <= min(open, close)`), and non-negative volume.
+  - `src/agentic_trading/strategy/indicators.py`: M8 `rsi` returns `Decimal("50")` on flat zero-volatility price series (avg_gain == 0 and avg_loss == 0).
+  - `src/agentic_trading/market_data/corporate_actions.py`: M9 deduplicate identical `CorporateAction` entries before computing cumulative factor in `adjust_candles_for_corporate_actions`; L5 scope cycle detection in `resolve_symbol_lineage` strictly to connected component of target symbol.
+  - `src/agentic_trading/market_data/instruments.py`: L3 `threading.RLock` protecting all `InstrumentRegistry` reads and writes; L4 reject `datetime` instances in `Instrument.is_active_on`, `InstrumentRegistry.get_as_of`, and `InstrumentRegistry.list_active_on` with `TypeError`.
+  - `v3-zerodha/src/agentic_trading/zerodha_connector.py`: `ReadOnlyKiteConnect._request` aligned to kiteconnect signature (`route, method, url_args=None, params=None, is_json=False, query_params=None`), blocking non-GET methods before transport; L8 `ZerodhaReadOnlyConnector.logout()` on injected client is an immediate no-op, preserving caller client and keyring token.
+  - `tests/test_m2c_cross_market_foundation.py`: added 7 regression tests for H5, H6, H7, L7, M9, L5, L3, L4.
+  - `tests/test_m3_simulation_and_risk.py`: added regression tests for M7 and M8.
+  - `tests/test_zerodha_kiteconnect_integration.py`: added regression tests for `_request` signature/blocking and injected client `logout()` isolation.
+  - `tests/test_claude_batch4_regressions.py`: updated test assertion to verify `delete_password.assert_not_called()` on injected logout per L8.
+  - `docs/project-memory/DECISION_LOG.md`: recorded ADR-023.
+  - `docs/project-memory/CURRENT_STATE.md`: updated status to 400 passed tests.
+  - `docs/project-memory/NEXT_ACTIONS.md`: updated with Batch B completion.
+  - `docs/project-memory/SESSION_LOG.md`: recorded this session.
+- **Verification Evidence:**
+  - Full pytest suite: **400 passed in 2.54s** on Python 3.11.9 (`.venv311`) and **400 passed in 2.06s** on Python 3.14.4 (`.venv`).
+  - Total test coverage: **87.18%** (exceeds mandatory 85% requirement with `--cov-fail-under=85`).
+  - Ruff check: clean (0 errors) across `src/`, `tests/`, and `v3-zerodha/src/`.
+  - Python compileall: clean (0 errors) on both Python 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` clean (0 leaks).
+  - Comment check: verified 0 `#` comment characters across all new and edited Python code and tests.

@@ -47,20 +47,28 @@ def test_market_data_has_no_broker_or_risk_engine_imports() -> None:
 
 def test_risk_engine_has_no_live_broker_imports() -> None:
     """Validate that risk_engine has no broker connector or live execution imports."""
-    risk_file = Path(__file__).resolve().parent.parent / "src" / "agentic_trading" / "risk_engine.py"
-    assert risk_file.is_file(), f"File not found: {risk_file}"
+    src_dir = Path(__file__).resolve().parent.parent / "src" / "agentic_trading"
+    risk_file = src_dir / "risk_engine.py"
+    files_to_check: list[Path] = []
+    if risk_file.is_file():
+        files_to_check.append(risk_file)
+    risk_dir = src_dir / "risk_engine"
+    if risk_dir.is_dir():
+        files_to_check.extend(risk_dir.glob("*.py"))
+    assert files_to_check, "No risk engine files found"
 
-    imports = _get_imports_from_file(risk_file)
-    for imp in imports:
-        assert "zerodha" not in imp.lower(), (
-            f"Boundary violation in risk_engine.py: imports broker connector ({imp})"
-        )
-        assert "kiteconnect" not in imp.lower(), (
-            f"Boundary violation in risk_engine.py: imports live broker SDK ({imp})"
-        )
-        assert "live" not in imp.lower() or "agentic_trading" not in imp.lower(), (
-            f"Boundary violation in risk_engine.py: imports live trading module ({imp})"
-        )
+    for py_file in files_to_check:
+        imports = _get_imports_from_file(py_file)
+        for imp in imports:
+            assert "zerodha" not in imp.lower(), (
+                f"Boundary violation in {py_file.name}: imports broker connector ({imp})"
+            )
+            assert "kiteconnect" not in imp.lower(), (
+                f"Boundary violation in {py_file.name}: imports live broker SDK ({imp})"
+            )
+            assert "live" not in imp.lower() or "agentic_trading" not in imp.lower(), (
+                f"Boundary violation in {py_file.name}: imports live trading module ({imp})"
+            )
 
 
 def test_market_data_all_exports_are_importable() -> None:

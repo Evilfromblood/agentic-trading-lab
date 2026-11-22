@@ -36,10 +36,12 @@ from agentic_trading.market_data.models import (
     Exchange,
     ExchangeCalendar,
 )
-from agentic_trading.market_data.provider import ProviderResponse
+from agentic_trading.market_data.provider import ProviderPayloadError, ProviderResponse
 from agentic_trading.market_data.replay_fixtures import (
+    _DEFAULT_HMAC_KEY,
     FixtureIntegrityError,
     StoredReplayFixtureProvider,
+    _compute_fixture_hmac,
     save_replay_fixture,
 )
 
@@ -844,17 +846,27 @@ def test_stored_replay_fixture_corrupt_manifest_and_payload() -> None:
         base = Path(tmp_dir)
         m_file = base / "corrupt_payload.manifest.json"
         p_file = base / "corrupt_payload.payload.json"
-        import hashlib
         bad_bytes = b"not json"
-        bad_sha = hashlib.sha256(bad_bytes).hexdigest()
         p_file.write_bytes(bad_bytes)
+        recorded_at_str = datetime(2026, 1, 1, tzinfo=IST).isoformat()
+        bad_sha = _compute_fixture_hmac(
+            _DEFAULT_HMAC_KEY,
+            "corrupt_payload",
+            "SRC",
+            Exchange.NSE.value,
+            "INFY",
+            CandleInterval.M5.value,
+            recorded_at_str,
+            0,
+            bad_bytes,
+        )
         manifest_data = {
             "fixture_id": "corrupt_payload",
             "source": "SRC",
             "exchange": "NSE",
             "symbol": "INFY",
             "interval": "5m",
-            "recorded_at": datetime(2026, 1, 1, tzinfo=IST).isoformat(),
+            "recorded_at": recorded_at_str,
             "record_count": 0,
             "payload_sha256": bad_sha,
         }
@@ -871,16 +883,26 @@ def test_stored_replay_fixture_corrupt_manifest_and_payload() -> None:
         m_file = base / "not_list.manifest.json"
         p_file = base / "not_list.payload.json"
         bad_bytes = b'{"not": "a list"}'
-        import hashlib
-        bad_sha = hashlib.sha256(bad_bytes).hexdigest()
         p_file.write_bytes(bad_bytes)
+        recorded_at_str = datetime(2026, 1, 1, tzinfo=IST).isoformat()
+        bad_sha = _compute_fixture_hmac(
+            _DEFAULT_HMAC_KEY,
+            "not_list",
+            "SRC",
+            Exchange.NSE.value,
+            "INFY",
+            CandleInterval.M5.value,
+            recorded_at_str,
+            0,
+            bad_bytes,
+        )
         manifest_data = {
             "fixture_id": "not_list",
             "source": "SRC",
             "exchange": "NSE",
             "symbol": "INFY",
             "interval": "5m",
-            "recorded_at": datetime(2026, 1, 1, tzinfo=IST).isoformat(),
+            "recorded_at": recorded_at_str,
             "record_count": 0,
             "payload_sha256": bad_sha,
         }
@@ -897,16 +919,26 @@ def test_stored_replay_fixture_corrupt_manifest_and_payload() -> None:
         m_file = base / "not_mapping.manifest.json"
         p_file = base / "not_mapping.payload.json"
         bad_bytes = b'["not a mapping"]'
-        import hashlib
-        bad_sha = hashlib.sha256(bad_bytes).hexdigest()
         p_file.write_bytes(bad_bytes)
+        recorded_at_str = datetime(2026, 1, 1, tzinfo=IST).isoformat()
+        bad_sha = _compute_fixture_hmac(
+            _DEFAULT_HMAC_KEY,
+            "not_mapping",
+            "SRC",
+            Exchange.NSE.value,
+            "INFY",
+            CandleInterval.M5.value,
+            recorded_at_str,
+            1,
+            bad_bytes,
+        )
         manifest_data = {
             "fixture_id": "not_mapping",
             "source": "SRC",
             "exchange": "NSE",
             "symbol": "INFY",
             "interval": "5m",
-            "recorded_at": datetime(2026, 1, 1, tzinfo=IST).isoformat(),
+            "recorded_at": recorded_at_str,
             "record_count": 1,
             "payload_sha256": bad_sha,
         }
@@ -923,16 +955,26 @@ def test_stored_replay_fixture_corrupt_manifest_and_payload() -> None:
         m_file = base / "count_mismatch.manifest.json"
         p_file = base / "count_mismatch.payload.json"
         bad_bytes = b'[]'
-        import hashlib
-        bad_sha = hashlib.sha256(bad_bytes).hexdigest()
         p_file.write_bytes(bad_bytes)
+        recorded_at_str = datetime(2026, 1, 1, tzinfo=IST).isoformat()
+        bad_sha = _compute_fixture_hmac(
+            _DEFAULT_HMAC_KEY,
+            "count_mismatch",
+            "SRC",
+            Exchange.NSE.value,
+            "INFY",
+            CandleInterval.M5.value,
+            recorded_at_str,
+            5,
+            bad_bytes,
+        )
         manifest_data = {
             "fixture_id": "count_mismatch",
             "source": "SRC",
             "exchange": "NSE",
             "symbol": "INFY",
             "interval": "5m",
-            "recorded_at": datetime(2026, 1, 1, tzinfo=IST).isoformat(),
+            "recorded_at": recorded_at_str,
             "record_count": 5,
             "payload_sha256": bad_sha,
         }
@@ -978,3 +1020,369 @@ def test_stored_replay_fixture_fetch_latest_empty_match() -> None:
         latest = provider.fetch_latest("NONEXISTENT", Exchange.NSE, CandleInterval.M5)
         assert latest.success is True
         assert len(latest.records) == 0
+
+
+def test_replay_fixture_h5_historical_filtering_mismatch() -> None:
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        t0 = datetime(2026, 11, 2, 9, 15, tzinfo=IST)
+        records = [
+            {
+                "symbol": "INFY",
+                "exchange": Exchange.NSE.value,
+                "interval": CandleInterval.M5.value,
+                "timestamp": t0.isoformat(),
+                "open": "1500.00",
+                "high": "1510.00",
+                "low": "1495.00",
+                "close": "1505.00",
+                "volume": 5000,
+            }
+        ]
+        response = ProviderResponse(
+            success=True,
+            source="SRC",
+            retrieval_timestamp=t0 + timedelta(minutes=15),
+            records=tuple(records),
+        )
+        save_replay_fixture(
+            directory=tmp_dir,
+            fixture_id="h5_filter_test",
+            response=response,
+            exchange=Exchange.NSE,
+            symbol="INFY",
+            interval=CandleInterval.M5,
+        )
+        provider = StoredReplayFixtureProvider(tmp_dir, "h5_filter_test")
+
+        res_diff_symbol = provider.fetch_historical(
+            HistoricalDataRequest(
+                symbol="TCS",
+                exchange=Exchange.NSE,
+                interval=CandleInterval.M5,
+                start_time=t0,
+                end_time=t0 + timedelta(minutes=10),
+            )
+        )
+        assert res_diff_symbol.success is True
+        assert len(res_diff_symbol.records) == 0
+
+        res_diff_exchange = provider.fetch_historical(
+            HistoricalDataRequest(
+                symbol="INFY",
+                exchange=Exchange.BSE,
+                interval=CandleInterval.M5,
+                start_time=t0,
+                end_time=t0 + timedelta(minutes=10),
+            )
+        )
+        assert res_diff_exchange.success is True
+        assert len(res_diff_exchange.records) == 0
+
+        res_diff_interval = provider.fetch_historical(
+            HistoricalDataRequest(
+                symbol="INFY",
+                exchange=Exchange.NSE,
+                interval=CandleInterval.M15,
+                start_time=t0,
+                end_time=t0 + timedelta(minutes=10),
+            )
+        )
+        assert res_diff_interval.success is True
+        assert len(res_diff_interval.records) == 0
+
+        res_match = provider.fetch_historical(
+            HistoricalDataRequest(
+                symbol="INFY",
+                exchange=Exchange.NSE,
+                interval=CandleInterval.M5,
+                start_time=t0,
+                end_time=t0 + timedelta(minutes=10),
+            )
+        )
+        assert res_match.success is True
+        assert len(res_match.records) == 1
+
+
+def test_replay_fixture_h6_close_time_slicing_excludes_inprogress() -> None:
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        t0 = datetime(2026, 11, 2, 9, 15, tzinfo=IST)
+        records = [
+            {
+                "symbol": "INFY",
+                "exchange": Exchange.NSE.value,
+                "interval": CandleInterval.M5.value,
+                "timestamp": t0.isoformat(),
+                "open": "1500.00",
+                "high": "1510.00",
+                "low": "1495.00",
+                "close": "1505.00",
+                "volume": 5000,
+            }
+        ]
+        response = ProviderResponse(
+            success=True,
+            source="SRC",
+            retrieval_timestamp=t0 + timedelta(minutes=15),
+            records=tuple(records),
+        )
+        save_replay_fixture(
+            directory=tmp_dir,
+            fixture_id="h6_slicing_test",
+            response=response,
+            exchange=Exchange.NSE,
+            symbol="INFY",
+            interval=CandleInterval.M5,
+        )
+        provider = StoredReplayFixtureProvider(tmp_dir, "h6_slicing_test")
+
+        hist_before_close = provider.fetch_historical(
+            HistoricalDataRequest(
+                symbol="INFY",
+                exchange=Exchange.NSE,
+                interval=CandleInterval.M5,
+                start_time=t0,
+                end_time=t0 + timedelta(minutes=4),
+            )
+        )
+        assert len(hist_before_close.records) == 0
+
+        hist_at_close = provider.fetch_historical(
+            HistoricalDataRequest(
+                symbol="INFY",
+                exchange=Exchange.NSE,
+                interval=CandleInterval.M5,
+                start_time=t0,
+                end_time=t0 + timedelta(minutes=5),
+            )
+        )
+        assert len(hist_at_close.records) == 1
+
+        latest_before_close = provider.fetch_latest(
+            "INFY", Exchange.NSE, CandleInterval.M5, now=t0 + timedelta(minutes=4)
+        )
+        assert len(latest_before_close.records) == 0
+
+        latest_at_close = provider.fetch_latest(
+            "INFY", Exchange.NSE, CandleInterval.M5, now=t0 + timedelta(minutes=5)
+        )
+        assert len(latest_at_close.records) == 1
+
+
+def test_replay_fixture_h7_l7_hmac_and_manifest_guards() -> None:
+    import json
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        t0 = datetime(2026, 11, 2, 9, 15, tzinfo=IST)
+        records = [
+            {
+                "symbol": "INFY",
+                "exchange": Exchange.NSE.value,
+                "interval": CandleInterval.M5.value,
+                "timestamp": t0.isoformat(),
+                "open": "1500.00",
+                "high": "1510.00",
+                "low": "1495.00",
+                "close": "1505.00",
+                "volume": 5000,
+            }
+        ]
+        response = ProviderResponse(
+            success=True,
+            source="SRC",
+            retrieval_timestamp=t0 + timedelta(minutes=15),
+            records=tuple(records),
+        )
+
+        custom_key = b"custom-secret-key-12345"
+        save_replay_fixture(
+            directory=tmp_dir,
+            fixture_id="custom_key_fixture",
+            response=response,
+            exchange=Exchange.NSE,
+            symbol="INFY",
+            interval=CandleInterval.M5,
+            hmac_key=custom_key,
+        )
+
+        prov_default = StoredReplayFixtureProvider(tmp_dir, "custom_key_fixture")
+        with pytest.raises(FixtureIntegrityError, match="HMAC digest mismatch"):
+            prov_default.fetch_latest("INFY", Exchange.NSE, CandleInterval.M5)
+
+        prov_custom = StoredReplayFixtureProvider(tmp_dir, "custom_key_fixture", hmac_key=custom_key)
+        assert len(prov_custom.fetch_latest("INFY", Exchange.NSE, CandleInterval.M5).records) == 1
+
+        with pytest.raises(FixtureIntegrityError, match="already exists"):
+            save_replay_fixture(
+                directory=tmp_dir,
+                fixture_id="custom_key_fixture",
+                response=response,
+                exchange=Exchange.NSE,
+                symbol="INFY",
+                interval=CandleInterval.M5,
+                hmac_key=custom_key,
+                overwrite=False,
+            )
+
+        save_replay_fixture(
+            directory=tmp_dir,
+            fixture_id="custom_key_fixture",
+            response=response,
+            exchange=Exchange.NSE,
+            symbol="INFY",
+            interval=CandleInterval.M5,
+            hmac_key=custom_key,
+            overwrite=True,
+        )
+
+        manifest_path = Path(tmp_dir) / "custom_key_fixture.manifest.json"
+        manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest_data["exchange"] = "BSE"
+        manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
+
+        with pytest.raises(FixtureIntegrityError, match="HMAC digest mismatch"):
+            prov_custom.fetch_latest("INFY", Exchange.NSE, CandleInterval.M5)
+
+        del manifest_data["recorded_at"]
+        manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
+        with pytest.raises(FixtureIntegrityError, match="Missing required manifest field"):
+            prov_custom.fetch_latest("INFY", Exchange.NSE, CandleInterval.M5)
+
+        save_replay_fixture(
+            directory=tmp_dir,
+            fixture_id="missing_ts_fixture",
+            response=response,
+            exchange=Exchange.NSE,
+            symbol="INFY",
+            interval=CandleInterval.M5,
+        )
+        payload_path = Path(tmp_dir) / "missing_ts_fixture.payload.json"
+        m_path = Path(tmp_dir) / "missing_ts_fixture.manifest.json"
+        bad_payload = json.dumps([{"symbol": "INFY", "close": "1505.00"}]).encode("utf-8")
+        payload_path.write_bytes(bad_payload)
+
+        m_dict = json.loads(m_path.read_text(encoding="utf-8"))
+        bad_sha = _compute_fixture_hmac(
+            _DEFAULT_HMAC_KEY,
+            "missing_ts_fixture",
+            "SRC",
+            Exchange.NSE.value,
+            "INFY",
+            CandleInterval.M5.value,
+            m_dict["recorded_at"],
+            m_dict["record_count"],
+            bad_payload,
+        )
+        m_dict["payload_sha256"] = bad_sha
+        m_path.write_text(json.dumps(m_dict), encoding="utf-8")
+
+        p_missing_ts = StoredReplayFixtureProvider(tmp_dir, "missing_ts_fixture")
+        with pytest.raises(ProviderPayloadError, match="missing timestamp"):
+            p_missing_ts.fetch_latest("INFY", Exchange.NSE, CandleInterval.M5)
+
+
+def test_corporate_action_m9_duplicate_deduplication() -> None:
+    t0 = datetime(2026, 5, 1, 9, 15, tzinfo=IST)
+    candle = Candle(
+        symbol="INFY",
+        exchange=Exchange.NSE,
+        interval=CandleInterval.D1,
+        open=Decimal("2000.00"),
+        high=Decimal("2050.00"),
+        low=Decimal("1990.00"),
+        close=Decimal("2020.00"),
+        volume=1000,
+        timestamp=t0,
+        source="SRC",
+        retrieval_timestamp=t0 + timedelta(days=1),
+    )
+    action = CorporateAction(
+        exchange=Exchange.NSE,
+        symbol="INFY",
+        action_type=CorporateActionType.SPLIT,
+        effective_date=date(2026, 6, 1),
+        adjustment_factor=Decimal("2.0"),
+    )
+    adjusted_candles = adjust_candles_for_corporate_actions([candle], [action, action])
+    assert len(adjusted_candles) == 1
+    assert adjusted_candles[0].close == Decimal("4040.00")
+    assert adjusted_candles[0].volume == 500
+
+
+def test_symbol_lineage_l5_isolated_unrelated_cycle() -> None:
+    actions = [
+        CorporateAction(
+            exchange=Exchange.NSE,
+            symbol="CYCLE_A",
+            action_type=CorporateActionType.SYMBOL_CHANGE,
+            effective_date=date(2026, 1, 1),
+            new_symbol="CYCLE_B",
+        ),
+        CorporateAction(
+            exchange=Exchange.NSE,
+            symbol="CYCLE_B",
+            action_type=CorporateActionType.SYMBOL_CHANGE,
+            effective_date=date(2026, 2, 1),
+            new_symbol="CYCLE_A",
+        ),
+        CorporateAction(
+            exchange=Exchange.NSE,
+            symbol="INFY_OLD",
+            action_type=CorporateActionType.SYMBOL_CHANGE,
+            effective_date=date(2026, 3, 1),
+            new_symbol="INFY",
+        ),
+    ]
+    resolved = resolve_symbol_lineage(Exchange.NSE, "INFY", date(2026, 1, 1), actions)
+    assert resolved == "INFY_OLD"
+
+
+def test_instrument_registry_l3_thread_safety() -> None:
+    import concurrent.futures
+
+    registry = InstrumentRegistry()
+    instruments = [
+        Instrument(
+            symbol=f"SYM{i}",
+            exchange=Exchange.NSE,
+            currency=Currency.INR,
+            provider_tokens={"provider1": f"tok_{i}"},
+        )
+        for i in range(100)
+    ]
+
+    def register_inst(inst: Instrument) -> None:
+        registry.register(inst)
+
+    def read_inst(inst: Instrument) -> None:
+        fetched = registry.get(inst.exchange, inst.symbol)
+        assert fetched == inst
+        by_tok = registry.get_by_token("provider1", f"tok_{inst.symbol[3:]}")
+        assert by_tok == inst
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(register_inst, instruments))
+        list(executor.map(read_inst, instruments))
+
+    assert len(registry.list_by_exchange(Exchange.NSE)) == 100
+
+
+def test_instrument_l4_datetime_rejection() -> None:
+    inst = Instrument(
+        symbol="INFY",
+        exchange=Exchange.NSE,
+        currency=Currency.INR,
+        listed_date=date(2020, 1, 1),
+        delisted_date=date(2030, 1, 1),
+    )
+    dt_val = datetime(2026, 1, 1, 10, 0, tzinfo=IST)
+
+    with pytest.raises(TypeError, match="as_of_date must be a date, not datetime"):
+        inst.is_active_on(dt_val)
+
+    registry = InstrumentRegistry()
+    registry.register(inst)
+
+    with pytest.raises(TypeError, match="as_of_date must be a date, not datetime"):
+        registry.get_as_of(Exchange.NSE, "INFY", dt_val)
+
+    with pytest.raises(TypeError, match="as_of_date must be a date, not datetime"):
+        registry.list_active_on(Exchange.NSE, dt_val)

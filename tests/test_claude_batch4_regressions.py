@@ -567,9 +567,8 @@ def test_h1_connector_read_methods_with_session() -> None:
             with pytest.raises(PermissionError):
                 connector.complete_login("mock_request_token")
 
-            # logout of injected client only clears keyring; does not mutate stub
             connector.logout()
-            mock_keyring.delete_password.assert_called()
+            mock_keyring.delete_password.assert_not_called()
         finally:
             os.environ.pop("KITE_API_SECRET", None)
 

@@ -1,8 +1,10 @@
 """Cross-market instrument and currency core models and registry."""
 from __future__ import annotations
 
+import threading
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -111,6 +113,9 @@ class Instrument:
     lot_size: int = 1
     isin: str | None = None
     provider_tokens: Mapping[str, str] = field(default_factory=dict)
+    listed_date: date | None = None
+    delisted_date: date | None = None
+    version: int = 1
 
     def __post_init__(self) -> None:
         if not isinstance(self.symbol, str) or not self.symbol.strip():
@@ -149,12 +154,35 @@ class Instrument:
         if isinstance(self.lot_size, bool) or not isinstance(self.lot_size, int) or self.lot_size < 1:
             raise ValueError(f"lot_size must be an integer >= 1, got {self.lot_size}")
 
+        if isinstance(self.version, bool) or not isinstance(self.version, int) or self.version < 1:
+            raise ValueError(f"version must be an integer >= 1, got {self.version}")
+
+        if self.listed_date is not None and not isinstance(self.listed_date, date):
+            raise TypeError(f"listed_date must be a date, got {type(self.listed_date).__name__}")
+
+        if self.delisted_date is not None and not isinstance(self.delisted_date, date):
+            raise TypeError(f"delisted_date must be a date, got {type(self.delisted_date).__name__}")
+
+        if self.listed_date is not None and self.delisted_date is not None and self.listed_date > self.delisted_date:
+            raise ValueError(
+                f"listed_date ({self.listed_date}) cannot be after delisted_date ({self.delisted_date})"
+            )
+
         if self.isin is not None:
             if not isinstance(self.isin, str) or not self.isin.strip():
                 raise ValueError("isin must be a non-empty string when provided")
             object.__setattr__(self, "isin", self.isin.strip().upper())
 
         object.__setattr__(self, "provider_tokens", _deep_freeze(dict(self.provider_tokens)))
+
+    def is_active_on(self, as_of_date: date) -> bool:
+        if isinstance(as_of_date, datetime) or not isinstance(as_of_date, date):
+            raise TypeError(f"as_of_date must be a date, not datetime, got {type(as_of_date).__name__}")
+        if self.listed_date is not None and as_of_date < self.listed_date:
+            return False
+        if self.delisted_date is not None and as_of_date > self.delisted_date:
+            return False
+        return True
 
 
 class UnknownInstrumentError(KeyError):
@@ -169,49 +197,77 @@ class InstrumentRegistry:
     """Thread-safe in-memory registry of traded instruments."""
 
     def __init__(self) -> None:
+        self._lock = threading.RLock()
         self._by_exchange_symbol: dict[tuple[Exchange, str], Instrument] = {}
         self._by_provider_token: dict[tuple[str, str], Instrument] = {}
 
     def register(self, instrument: Instrument) -> None:
-        if not isinstance(instrument, Instrument):
-            raise TypeError(f"instrument must be an Instrument instance, got {type(instrument).__name__}")
-        key = (instrument.exchange, instrument.symbol)
-        if key in self._by_exchange_symbol:
-            raise DuplicateInstrumentError(
-                f"Instrument already registered for exchange and symbol: {instrument.exchange.value}:{instrument.symbol}"
-            )
-        for provider, token in instrument.provider_tokens.items():
-            pt_key = (provider, token)
-            if pt_key in self._by_provider_token:
+        with self._lock:
+            if not isinstance(instrument, Instrument):
+                raise TypeError(f"instrument must be an Instrument instance, got {type(instrument).__name__}")
+            key = (instrument.exchange, instrument.symbol)
+            if key in self._by_exchange_symbol:
                 raise DuplicateInstrumentError(
-                    f"Provider token already registered: provider '{provider}', token '{token}'"
+                    f"Instrument already registered for exchange and symbol: {instrument.exchange.value}:{instrument.symbol}"
                 )
-        self._by_exchange_symbol[key] = instrument
-        for provider, token in instrument.provider_tokens.items():
-            self._by_provider_token[(provider, token)] = instrument
+            for provider, token in instrument.provider_tokens.items():
+                pt_key = (provider, token)
+                if pt_key in self._by_provider_token:
+                    raise DuplicateInstrumentError(
+                        f"Provider token already registered: provider '{provider}', token '{token}'"
+                    )
+            self._by_exchange_symbol[key] = instrument
+            for provider, token in instrument.provider_tokens.items():
+                self._by_provider_token[(provider, token)] = instrument
 
     def get(self, exchange: Exchange, symbol: str) -> Instrument:
-        if not isinstance(exchange, Exchange):
-            raise TypeError(f"exchange must be an Exchange enum, got {type(exchange).__name__}")
-        if not isinstance(symbol, str) or not symbol.strip():
-            raise ValueError("symbol must be a non-empty string")
-        clean_symbol = symbol.strip().upper()
-        inst = self._by_exchange_symbol.get((exchange, clean_symbol))
-        if inst is None:
-            raise UnknownInstrumentError(f"No instrument found for {exchange.value}:{clean_symbol}")
-        return inst
+        with self._lock:
+            if not isinstance(exchange, Exchange):
+                raise TypeError(f"exchange must be an Exchange enum, got {type(exchange).__name__}")
+            if not isinstance(symbol, str) or not symbol.strip():
+                raise ValueError("symbol must be a non-empty string")
+            clean_symbol = symbol.strip().upper()
+            inst = self._by_exchange_symbol.get((exchange, clean_symbol))
+            if inst is None:
+                raise UnknownInstrumentError(f"No instrument found for {exchange.value}:{clean_symbol}")
+            return inst
+
+    def get_as_of(self, exchange: Exchange, symbol: str, as_of_date: date) -> Instrument:
+        with self._lock:
+            if isinstance(as_of_date, datetime) or not isinstance(as_of_date, date):
+                raise TypeError(f"as_of_date must be a date, not datetime, got {type(as_of_date).__name__}")
+            inst = self.get(exchange, symbol)
+            if not inst.is_active_on(as_of_date):
+                raise UnknownInstrumentError(
+                    f"Instrument {inst.symbol} on {inst.exchange.value} is not active as of {as_of_date}"
+                )
+            return inst
 
     def get_by_token(self, provider: str, token: str) -> Instrument:
-        if not isinstance(provider, str) or not provider.strip():
-            raise ValueError("provider must be a non-empty string")
-        if not isinstance(token, str) or not token.strip():
-            raise ValueError("token must be a non-empty string")
-        inst = self._by_provider_token.get((provider.strip(), token.strip()))
-        if inst is None:
-            raise UnknownInstrumentError(f"No instrument found for provider '{provider}' and token '{token}'")
-        return inst
+        with self._lock:
+            if not isinstance(provider, str) or not provider.strip():
+                raise ValueError("provider must be a non-empty string")
+            if not isinstance(token, str) or not token.strip():
+                raise ValueError("token must be a non-empty string")
+            inst = self._by_provider_token.get((provider.strip(), token.strip()))
+            if inst is None:
+                raise UnknownInstrumentError(f"No instrument found for provider '{provider}' and token '{token}'")
+            return inst
 
     def list_by_exchange(self, exchange: Exchange) -> tuple[Instrument, ...]:
-        if not isinstance(exchange, Exchange):
-            raise TypeError(f"exchange must be an Exchange enum, got {type(exchange).__name__}")
-        return tuple(inst for (ex, _), inst in self._by_exchange_symbol.items() if ex == exchange)
+        with self._lock:
+            if not isinstance(exchange, Exchange):
+                raise TypeError(f"exchange must be an Exchange enum, got {type(exchange).__name__}")
+            return tuple(inst for (ex, _), inst in self._by_exchange_symbol.items() if ex == exchange)
+
+    def list_active_on(self, exchange: Exchange, as_of_date: date) -> tuple[Instrument, ...]:
+        with self._lock:
+            if not isinstance(exchange, Exchange):
+                raise TypeError(f"exchange must be an Exchange enum, got {type(exchange).__name__}")
+            if isinstance(as_of_date, datetime) or not isinstance(as_of_date, date):
+                raise TypeError(f"as_of_date must be a date, not datetime, got {type(as_of_date).__name__}")
+            return tuple(
+                inst
+                for (ex, _), inst in self._by_exchange_symbol.items()
+                if ex == exchange and inst.is_active_on(as_of_date)
+            )

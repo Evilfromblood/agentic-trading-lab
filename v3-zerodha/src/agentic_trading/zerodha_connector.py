@@ -185,10 +185,25 @@ if KiteConnect is not None:
             self.reqsession.mount("https://", adapter)
             self.reqsession.mount("http://", adapter)
 
-        def _request(self, method: str, *args: Any, **kwargs: Any) -> Any:
+        def _request(
+            self,
+            route: str,
+            method: str,
+            url_args: Any = None,
+            params: Any = None,
+            is_json: bool = False,
+            query_params: Any = None,
+        ) -> Any:
             if method.upper() != "GET":
                 raise PermissionError(f"HTTP method '{method}' is forbidden in read-only mode")
-            return super()._request(method, *args, **kwargs)
+            return super()._request(
+                route,
+                method,
+                url_args=url_args,
+                params=params,
+                is_json=is_json,
+                query_params=query_params,
+            )
 
         def _post(self, *args: Any, **kwargs: Any) -> Any:
             raise PermissionError("HTTP POST is forbidden in read-only mode")
@@ -486,7 +501,6 @@ def _init_facades() -> tuple[type, type]:
             entry = _connector_registry.get(self)
             tgt, injected = entry if entry is not None else (None, False)
             if injected:
-                _safe_delete_stored_token()
                 return
             _safe_delete_stored_token()
             if tgt is not None:
