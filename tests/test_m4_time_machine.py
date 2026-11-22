@@ -500,8 +500,12 @@ def test_monte_carlo_degenerate_cases_and_validation() -> None:
         run_seeded_monte_carlo(trades, Money(Decimal("0"), Currency.INR))
     with pytest.raises(ValueError):
         run_seeded_monte_carlo(trades, capital, ruin_drawdown_pct=Decimal("0"))
-    with pytest.raises(ValueError):
-        run_seeded_monte_carlo([], capital)
+    empty_mc = run_seeded_monte_carlo([], capital)
+    assert empty_mc.trade_count == 0
+    assert empty_mc.return_pct_p50 == Decimal("0.0000")
+    assert empty_mc.max_drawdown_pct_p50 == Decimal("0.0000")
+    assert empty_mc.probability_of_loss_pct == Decimal("0.0000")
+    assert empty_mc.probability_of_ruin_pct == Decimal("0.0000")
     with pytest.raises(CurrencyMismatchError):
         run_seeded_monte_carlo([make_trade("1", Currency.USD)], capital)
 
@@ -693,6 +697,78 @@ def test_equity_curve_exposure_and_ledger_order() -> None:
     stamps = [e.timestamp for e in result.ledger.entries]
     assert stamps == sorted(stamps)
     assert 0 < result.metrics.exposure_pct < 100
+
+
+def test_manifest_keyed_hmac_and_backtest_config_validation() -> None:
+    bars = make_bars(_trending_rows(10))
+    key = "lab-audit-secret-key"
+    key_bytes = b"lab-audit-secret-key"
+    config = make_config(hmac_key=key)
+    result = BacktestEngine().run(nse_instrument(), bars, Scripted({2: LONG, 5: EXIT}), config)
+    manifest = result.manifest
+    assert verify_manifest_integrity(manifest, hmac_key=key)
+    assert verify_manifest_integrity(manifest, hmac_key=key_bytes)
+    assert not verify_manifest_integrity(manifest, hmac_key="wrong-key")
+    assert not verify_manifest_integrity(manifest, hmac_key=None)
+    assert not verify_manifest_integrity(manifest)
+    unkeyed_config = make_config(hmac_key=None)
+    unkeyed_result = BacktestEngine().run(
+        nse_instrument(), bars, Scripted({2: LONG, 5: EXIT}), unkeyed_config
+    )
+    assert verify_manifest_integrity(unkeyed_result.manifest)
+    assert verify_manifest_integrity(unkeyed_result.manifest, hmac_key=None)
+    assert not verify_manifest_integrity(unkeyed_result.manifest, hmac_key=key)
+    tampered = dataclasses.replace(manifest, symbol="TAMPERED")
+    assert not verify_manifest_integrity(tampered, hmac_key=key)
+    assert not verify_manifest_integrity(manifest, hmac_key=123)
+    with pytest.raises(TypeError):
+        make_config(hmac_key=12345)
+    with pytest.raises(TypeError):
+        make_config(hmac_key=True)
+    with pytest.raises(ValueError):
+        make_config(hmac_key="")
+    with pytest.raises(ValueError):
+        build_experiment_manifest(
+            instrument=nse_instrument(),
+            candles=bars,
+            provider_source="test",
+            corporate_action_policy="NONE",
+            strategy_id="test",
+            strategy_params={},
+            fee_model_name="ZeroFeeModel",
+            slippage_model_name="ZeroSlippageModel",
+            risk_policy={},
+            initial_capital=Money(Decimal("100000"), Currency.INR),
+            random_seed=42,
+            git_commit="head",
+            hmac_key="",
+        )
+
+
+def test_final_bar_pending_signal_cancelled_at_end_of_data() -> None:
+    bars = make_bars(_trending_rows(5))
+    strategy = Scripted({len(bars): LONG})
+    result = BacktestEngine().run(nse_instrument(), bars, strategy, make_config())
+    assert len(result.trades) == 0
+    assert len(result.rejected_proposals) == 1
+    decision = result.rejected_proposals[0]
+    assert not decision.approved
+    assert decision.reasons == ("END_OF_DATA_PENDING_CANCELLED",)
+
+
+def test_protective_gap_through_stop_fills_at_open_with_adverse_slippage() -> None:
+    rows = flat_rows(3) + [FLAT, (80, 82, 75, 78)] + flat_rows(3)
+    slip_bps = Decimal("50")
+    config = make_config(
+        default_stop_loss_pct=Decimal("0.05"),
+        slip=BasisPointsSlippageModel(slip_bps),
+    )
+    result = BacktestEngine().run(nse_instrument(), make_bars(rows), Scripted({3: LONG}), config)
+    assert len(result.trades) == 1
+    trade = result.trades[0]
+    assert trade.exit_reason == "STOP_LOSS"
+    assert trade.stop_loss is not None and trade.stop_loss.amount == Decimal("95.00")
+    assert trade.exit_price.amount == Decimal("79.60")
 
 
 def test_time_machine_sources_have_no_inline_comments_or_forbidden_imports() -> None:

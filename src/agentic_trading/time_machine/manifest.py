@@ -123,8 +123,28 @@ class ExperimentManifest:
         object.__setattr__(self, "risk_policy", _deep_freeze(dict(self.risk_policy)))
 
 
-def _compute_seal(manifest: ExperimentManifest) -> str:
-    return sha256_of({name: getattr(manifest, name) for name in _SEALED_FIELDS})
+def _to_key_bytes(hmac_key: bytes | str) -> bytes:
+    if isinstance(hmac_key, str):
+        if not hmac_key:
+            raise ValueError("hmac_key cannot be empty")
+        return hmac_key.encode("utf-8")
+    if isinstance(hmac_key, (bytes, bytearray)):
+        if not hmac_key:
+            raise ValueError("hmac_key cannot be empty")
+        return bytes(hmac_key)
+    raise TypeError("hmac_key must be bytes or str")
+
+
+def _compute_seal(
+    manifest: ExperimentManifest, hmac_key: bytes | str | None = None
+) -> str:
+    canonical_payload = _dumps(
+        canonicalize({name: getattr(manifest, name) for name in _SEALED_FIELDS})
+    ).encode("ascii")
+    if hmac_key is not None:
+        key_bytes = _to_key_bytes(hmac_key)
+        return hmac.new(key_bytes, canonical_payload, hashlib.sha256).hexdigest()
+    return hashlib.sha256(canonical_payload).hexdigest()
 
 
 def build_experiment_manifest(
@@ -143,6 +163,7 @@ def build_experiment_manifest(
     git_commit: str,
     created_at: datetime | None = None,
     manifest_id: str | None = None,
+    hmac_key: bytes | str | None = None,
 ) -> ExperimentManifest:
     if not candles:
         raise ValueError("candles must be non-empty")
@@ -171,15 +192,17 @@ def build_experiment_manifest(
     }
     resolved_id = manifest_id if manifest_id is not None else f"exp-{sha256_of(fields_map)[:16]}"
     unsealed = ExperimentManifest(manifest_id=resolved_id, manifest_sha256="", **fields_map)
-    sealed = _compute_seal(unsealed)
+    sealed = _compute_seal(unsealed, hmac_key=hmac_key)
     return ExperimentManifest(
         manifest_id=resolved_id, manifest_sha256=sealed, **fields_map
     )
 
 
-def verify_manifest_integrity(manifest: ExperimentManifest) -> bool:
+def verify_manifest_integrity(
+    manifest: ExperimentManifest, hmac_key: bytes | str | None = None
+) -> bool:
     try:
-        expected = _compute_seal(manifest)
+        expected = _compute_seal(manifest, hmac_key=hmac_key)
         stored = manifest.manifest_sha256
         if not isinstance(stored, str):
             return False

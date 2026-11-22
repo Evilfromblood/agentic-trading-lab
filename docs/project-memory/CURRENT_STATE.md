@@ -48,17 +48,17 @@ Verified local Windows virtual environment output:
 - Ruff on `src/`, `tests/`, and `v3-zerodha/src`: passed (`All checks passed!`).
 - Python compileall: `python -m compileall -q src tests v3-zerodha/src` passed with exit code 0 on both 3.11.9 and 3.14.4.
 - `git diff --check`: exit code 0 (no whitespace errors or merge markers).
-- Full pytest suite: **413 passed in 11.21s** on genuine Python 3.11.9 (.venv311) and **413 passed in 7.42s** on Python 3.14.4 (.venv).
-- Genuine pytest-cov coverage: **87.27%** (exceeding mandatory 85% threshold with `--cov-fail-under=85`).
+- Full pytest suite: **441 passed in 14.13s** on genuine Python 3.11.9 (.venv311) and **441 passed in 6.73s** on Python 3.14.4 (.venv).
+- Genuine pytest-cov coverage: **88.54%** (exceeding mandatory 85% threshold with `--cov-fail-under=85`).
 - Secret scanning hook: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files, scanning `requirements.lock`.
-- Zero inline `#` comments verified across all new and edited files in M3 Hardening (D1, D2, D3).
+- Zero inline `#` comments verified across all new and edited files in M4 Hardening.
 
 ## Current milestone
 - Milestone 2a: COMPLETE and committed (`1b7e582`).
 - Milestone 2b: COMPLETE and committed (`edd383a`).
 - Milestone 2c: COMPLETE and verified.
-- Milestone 3: COMPLETE (including Batch A, Batch B, Final Polish Pass R1–R8, and D1–D3 Hardening) and verified locally in working tree.
-- Milestone 4 (Time Machine): IMPLEMENTED in the working tree (ADR-026); independent verification pending. Only the 25 new M4 tests were run (Linux Python 3.12, local pytest stand-in). Ruff, full suite, coverage, detect-secrets and the `.venv311` / `.venv` runs are NOT yet executed; the validation evidence above refers to M3 and must be re-run.
+- Milestone 3: COMPLETE and verified.
+- Milestone 4 (Time Machine): COMPLETE and hardened (ADR-026, ADR-027). Keyed HMAC manifests, end-of-data signal cancellation, zero-trade Monte Carlo support, gap-through stop fills with adverse slippage, and dual-Python verification with 88.54% coverage.
 
 ## Development workflow
 1. Claude independently verifies a frozen snapshot.

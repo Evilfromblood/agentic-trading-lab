@@ -24,8 +24,13 @@ Current priority: verify Milestone 4 (Time Machine) and decide the open design i
    - Authoritative deterministic proposal risk gate (`evaluate_trade_proposal`) enforcing currency matching, lot size alignment, position-aware SELL checks (`UNAUTHORIZED_SHORT`, `INSUFFICIENT_POSITION`), long-exit stop loss / take profit directional bounds, odd-lot full exit allowance without lot-size truncation, stop loss waiver on de-risking exits, kill-switch exit allowance during drawdown/daily loss, fail-closed validation for non-positive peak equity / entry price / stop loss / take profit / limit price, and exact `max_allowed_quantity`.
    - Zerodha connector: `ReadOnlyKiteConnect._request` aligned to kiteconnect signature, non-GET blocked before transport, and injected client `logout()` as no-op preserving caller client and keyring token.
    - 413 tests passing across the full suite on Python 3.11 and Python 3.14 with 87.27% coverage. Zero inline `#` comments.
-5. M4 Time Machine implemented (ADR-026): `src/agentic_trading/time_machine/` and `tests/test_m4_time_machine.py`. Required before acceptance: run Ruff, compileall, full pytest with `--cov-fail-under=85` and `detect-secrets-hook --baseline .secrets.baseline` on `.venv311` and `.venv`; independent adversarial review. Open design items: position rebasing across splits, liquidity-capped exits, keyed (HMAC) manifest signing, git commit read from the repository instead of config, ARCH-02 pipeline wiring.
-6. Later: paper trading engine, market/news intelligence agents and analytics dashboard.
+5. M4 Time Machine implemented and hardened (ADR-026, ADR-027):
+   - Cryptographically verifiable experiment manifests with keyed HMAC-SHA256 and fail-closed integrity checks.
+   - Strictly causal backtest execution with next-open entry, risk gate sizing, protective stops with gap-open adverse slippage, delisting liquidation, point-in-time corporate action handling, and exact-zero accounting conservation residual check.
+   - Walk-forward validation with isolated train/test splits and non-overlapping OOS windows.
+   - Seeded Monte Carlo bootstrap with graceful zero-trade handling and deterministic ruin/drawdown quantiles.
+   - 441 tests passing across the full suite on Python 3.11 and Python 3.14 with 88.54% coverage. Zero inline `#` comments.
+6. Next: Milestone 5 (Paper Trading Engine & Multi-Strategy Orchestration), market/news intelligence agents, and analytics dashboard.
 
 ## Review/remediation loop
 Claude independent verification -> ChatGPT triage and scoped technical direction -> Antigravity implementation and regression tests -> independent verification of the new snapshot. Avoid overlapping audits of unchanged code when a focused remediation cycle is more efficient.

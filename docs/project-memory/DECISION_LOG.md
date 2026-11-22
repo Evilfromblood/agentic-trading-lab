@@ -281,3 +281,34 @@ Append decisions; do not silently rewrite historical decisions. Mark superseded 
   12. **Monte Carlo:** `random.Random(seed)` with `randrange`; iid bootstrap of absolute trade `net_pnl` (ignores serial correlation and compounding). Ruin = drawdown >= `ruin_drawdown_pct` or equity <= 0 at any step. Empty trades raise `ValueError`.
 - **Known limitations:** single instrument, long-only, no pyramiding, `SHORT`/`FLAT` signals ignored; no partial exits; no position rebasing across splits; strategy attributes must be canonicalizable (string-keyed mappings, no arbitrary objects) or manifest creation fails closed.
 - **Verification:** 25 tests in `tests/test_m4_time_machine.py` pass in a Linux Python 3.12 sandbox using a minimal local `pytest` stand-in (the real `pytest`, `ruff`, `pytest-cov` and `detect-secrets` were unavailable offline). Nine deliberate engine/manifest/Monte Carlo mutations were applied and each is caught by at least one test. `compileall` passed on 3.12. Full-suite regression, Ruff, coverage (`--cov-fail-under=85`), secret scanning and the `.venv311` / `.venv` runs have NOT been executed and must be run locally before acceptance.
+
+
+## ADR-027 (Milestone 4 Adversarial Hardening & Verified Suite Evidence)
+- **Status:** Accepted (2026-11-23)
+- **Context:** Milestone 4 (Time Machine backtesting engine, walk-forward validation, seeded Monte Carlo, and experiment manifests) underwent adversarial review and hardening across both Python 3.11.9 and Python 3.14.4 environments.
+- **Decisions:**
+  1. **Keyed HMAC Authentication on Experiment Manifests (`manifest.py`, `engine.py`):**
+     - Extended `build_experiment_manifest` and `verify_manifest_integrity` with optional `hmac_key: bytes | str | None = None`.
+     - When `hmac_key` is provided, seals canonical JSON metadata using HMAC-SHA256 (`hmac.new(key_bytes, canonical_payload, hashlib.sha256).hexdigest()`), upgrading experiment manifests from unkeyed checksums to cryptographically authenticated seals.
+     - When `hmac_key is None`, preserves unkeyed SHA-256 for backward compatibility.
+     - Added `hmac_key: bytes | str | None = None` to `BacktestConfig` with fail-closed validation (`TypeError` for non-bytes/str, `ValueError` for empty key), automatically forwarded by `BacktestEngine.run` into `build_experiment_manifest`.
+     - Verification fails closed via `hmac.compare_digest` returning `False` on key mismatch, type error, or tampered payload.
+  2. **Final-Bar Pending Signal Non-Execution & Cancellation (`engine.py`):**
+     - In `_Session.execute()`, after the bar-processing loop, any pending order queued on the final bar is explicitly cancelled and recorded in `rejected_proposals` with reason `"END_OF_DATA_PENDING_CANCELLED"`.
+     - Eliminates orphaned pending proposals when data terminates without a subsequent bar.
+  3. **Zero-Trade Monte Carlo Graceful Handling (`monte_carlo.py`):**
+     - Updated `run_seeded_monte_carlo` to handle empty trade sequences gracefully instead of raising `ValueError`.
+     - Returns `MonteCarloSummary` with `trade_count=0`, all return/drawdown quantiles set to `Decimal("0.0000")`, and `probability_of_loss_pct` / `probability_of_ruin_pct` set to `Decimal("0.0000")`.
+  4. **Protective Gap-Through Stop Fill with Adverse Slippage (`engine.py`):**
+     - Verified and tested that positions gapping down through protective stops on bar open (`bar.open <= stop`) fill at `bar.open` (not the phantom stop price) with adverse slippage applied via `apply_fill(..., side="SELL")` tick-quantizing downward.
+  5. **Zero Inline Comments & Architectural Isolation:**
+     - Enforced 100% comment-free codebase across `src/agentic_trading/time_machine/` and `tests/test_m4_time_machine.py` via AST and tokenizer assertions.
+     - Enforced zero imports of `zerodha` or `kiteconnect` in time machine modules.
+- **Consequences:** Time machine backtests produce cryptographically verifiable manifests; zero-trade backtests, final-bar signals, and gap-through stops behave deterministically; complete test suite passes dual-Python verification with >88% coverage.
+- **Verification Evidence:**
+  - 441 tests pass across the full suite on genuine Python 3.11.9 (`.venv311`) in 14.13s and Python 3.14.4 (`.venv`) in 6.73s.
+  - Test coverage: **88.54%** (exceeding 85% requirement with `--cov-fail-under=85`).
+  - Ruff check: All checks passed!
+  - Compileall: 0 errors on Python 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files including `requirements.lock`.
+  - Zero inline `#` comments verified across all git diff additions.

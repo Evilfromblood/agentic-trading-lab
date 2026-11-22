@@ -2,6 +2,32 @@
 
 Append concise entries in reverse chronological order. Record verified outcomes, not intentions.
 
+## 2026-11-23 — Milestone 4 Adversarial Audit & Hardening (ADR-027)
+- Remediated all audit items and hardened Time Machine engine (`src/agentic_trading/time_machine/`):
+  - **Keyed HMAC Experiment Manifests (`manifest.py`, `engine.py`)**:
+    - Added optional `hmac_key: bytes | str | None = None` to `build_experiment_manifest` and `verify_manifest_integrity`.
+    - Computes HMAC-SHA256 when `hmac_key` is supplied, while preserving unkeyed SHA-256 when `None`.
+    - Added `hmac_key` to `BacktestConfig` with fail-closed validation (`TypeError` on non-bytes/str, `ValueError` on empty string), passed to manifest creation during `BacktestEngine.run`.
+    - Verification fails closed (`False`) on key mismatch, type error, or tampered metadata.
+  - **Final-Bar Pending Signal Cancellation (`engine.py`)**:
+    - In `_Session.execute()`, after bar loop completion, unexecuted pending orders are cancelled and recorded in `rejected_proposals` with reason `"END_OF_DATA_PENDING_CANCELLED"`.
+  - **Zero-Trade Monte Carlo Support (`monte_carlo.py`)**:
+    - Handled empty trades gracefully in `run_seeded_monte_carlo`, returning `MonteCarloSummary` with `trade_count=0`, all quantiles and ruin/loss probabilities set to `Decimal("0.0000")`.
+  - **Protective Gap-Through Stop Physics Verification (`engine.py`)**:
+    - Verified gap-down stops on open (`bar.open <= stop`) fill at `bar.open` with adverse slippage tick-quantized downward via `apply_fill(..., side="SELL")`.
+- **Regression Tests Added**:
+  - `test_manifest_keyed_hmac_and_backtest_config_validation`: Validates HMAC manifest signing with string/bytes keys, rejection on wrong keys/None, tamper detection, and `BacktestConfig` key type/empty validation.
+  - `test_final_bar_pending_signal_cancelled_at_end_of_data`: Asserts final-bar pending proposal cancellation at end of data.
+  - `test_protective_gap_through_stop_fills_at_open_with_adverse_slippage`: Asserts gap-through stop exit at open price minus adverse slippage.
+  - Updated zero-trade Monte Carlo assertion to verify clean 0-trade summary.
+- **Validation results**:
+  - Full pytest suite: **441 passed in 14.13s** on Python 3.11.9 (`.venv311`) and **441 passed in 6.73s** on Python 3.14.4 (`.venv`).
+  - Test coverage: **88.54%** across all source files (exceeding mandatory `--cov-fail-under=85`).
+  - Ruff check: `All checks passed!`.
+  - Compileall: 0 errors on Python 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked files.
+  - Zero inline `#` comments verified across all git diff additions.
+
 ## 2026-11-23 — M3 Hardening: Exact Cost Basis Parity & Recursive Non-Finite Validation (D1, D2, D3)
 - Remediated all 3 Claude adversarial audit findings (D1, D2, D3) across simulation and market data:
   - **Unified Position Mutation & Exact Zero-Drift Math (`portfolio.py` / D1, D2)**:

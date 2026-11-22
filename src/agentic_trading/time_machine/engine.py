@@ -87,6 +87,7 @@ class BacktestConfig:
     random_seed: int = 42
     git_commit: str = "2cac6ca"
     provider_source: str = "replay_fixture"
+    hmac_key: bytes | str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.initial_capital, Money):
@@ -122,6 +123,11 @@ class BacktestConfig:
             value = getattr(self, name)
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{name} must be a non-empty string")
+        if self.hmac_key is not None:
+            if isinstance(self.hmac_key, bool) or not isinstance(self.hmac_key, (bytes, str)):
+                raise TypeError("hmac_key must be bytes or str")
+            if not self.hmac_key:
+                raise ValueError("hmac_key cannot be empty")
 
 
 @dataclass(frozen=True)
@@ -322,6 +328,9 @@ class _Session:
         self.portfolio.deposit(self.config.initial_capital, first.timestamp, "INITIAL_CAPITAL")
         for index, bar in enumerate(self.bars):
             self._process_bar(index, bar)
+        if self.pending is not None:
+            self._reject(self.pending.proposal_id, "END_OF_DATA_PENDING_CANCELLED")
+            self.pending = None
         last = self.bars[-1]
         if self.position is not None:
             self._exit(last.close, "END_OF_DATA", last.close_time)
@@ -706,5 +715,6 @@ class BacktestEngine:
             initial_capital=config.initial_capital,
             random_seed=config.random_seed,
             git_commit=config.git_commit,
+            hmac_key=config.hmac_key,
         )
         return _Session(instrument, bars, strategy, config, relevant, manifest).execute()

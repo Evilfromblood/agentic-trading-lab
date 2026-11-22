@@ -68,7 +68,22 @@ def run_seeded_monte_carlo(
         raise ValueError("ruin_drawdown_pct must be a positive finite Decimal")
     outcomes = [t.net_pnl for t in trades]
     if not outcomes:
-        raise ValueError("trades must be non-empty to bootstrap")
+        zero_pct = ZERO.quantize(_QUANTUM, rounding=ROUND_HALF_EVEN)
+        return MonteCarloSummary(
+            seed=seed,
+            iterations=iterations,
+            trade_count=0,
+            initial_capital=initial_capital,
+            return_pct_p05=zero_pct,
+            return_pct_p25=zero_pct,
+            return_pct_p50=zero_pct,
+            return_pct_p75=zero_pct,
+            return_pct_p95=zero_pct,
+            max_drawdown_pct_p50=zero_pct,
+            max_drawdown_pct_p95=zero_pct,
+            probability_of_loss_pct=zero_pct,
+            probability_of_ruin_pct=zero_pct,
+        )
     if any(m.currency != initial_capital.currency for m in outcomes):
         raise CurrencyMismatchError("trade currency does not match initial_capital currency")
 
