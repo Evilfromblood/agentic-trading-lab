@@ -240,3 +240,24 @@ Append decisions; do not silently rewrite historical decisions. Mark superseded 
   7. **Iterative Corporate Action Lineage & Deduplication (R7):** Deduplicates identical corporate actions in `adjust_candles_for_corporate_actions` across `(exchange, symbol, action_type, effective_date, adjustment_factor, new_symbol)`. Replaced recursive DFS in `resolve_symbol_lineage` with iterative three-color cycle detection to safely handle arbitrary lineage depths (>1,500 hops).
 - **Consequences:** Simulation engine guarantees mathematical conservation to exact zero residual across arbitrary order fills; risk gate accurately handles odd-lot liquidations and long-exit bracket orders; replay fixtures and provider slices strictly enforce causal boundaries without data or timestamp leakage.
 - **Verification:** 410 tests pass across the full suite on genuine Python 3.11.9 (`.venv311`) and Python 3.14.4 (`.venv`) with 87.40% test coverage, clean Ruff linting, zero compile errors, zero unbaselined secrets, and zero inline `#` comments.
+
+
+## ADR-025 (Exact Zero-Drift Cost Basis & Replay Parity) — D1, D2, D3
+- **Status:** Accepted (2026-11-23)
+- **Context:** Claude adversarial audit identified cost basis calculation drift between live execution and ledger replay (D1, D2), and shallow non-finite pre-check in replay fixture serialization (D3).
+- **Decisions:**
+  1. **Unified Position Mutation & Exact Zero-Drift Math (D1, D2):**
+     - Refactored position mutation (`BUY` and `SELL`, long and short) into a single shared internal helper `_apply_trade_to_position` called by both `apply_fill` and `_replay_ledger`.
+     - `self._total_cost_basis: dict[tuple[Exchange, str], Decimal]` serves as the single source of truth for open position cost basis. `Position.average_cost` is derived at snapshot time as `Money(basis / Decimal(abs(qty)), currency)`.
+     - Adding to position: `self._total_cost_basis[key] = self._total_cost_basis.get(key, Decimal("0")) + (Decimal(add_qty) * exec_price_amount)` without recomputing prior basis.
+     - Reducing/closing position (`reduce_qty <= abs(curr_qty)`):
+       On full close (`reduce_qty == abs(curr_qty)`): `basis_removed = curr_basis`, `new_basis = Decimal("0")`.
+       On partial close (`reduce_qty < abs(curr_qty)`): `basis_removed = ((curr_basis * Decimal(reduce_qty)) / Decimal(abs(curr_qty))).quantize(Decimal("1E-12"), rounding=ROUND_HALF_EVEN)`, `new_basis = curr_basis - basis_removed`.
+       Realized P&L delta is `proceeds - basis_removed` for long reductions and `basis_removed - cover_cost` for short reductions.
+     - Flip trades (`quantity > abs(curr_qty)` when `allow_short=True`) close the existing side completely (`basis_removed = curr_basis`) and open the remainder on the opposite side with `new_basis = Decimal(rem_qty) * exec_price_amount`.
+     - Guarantees `(deposits - withdrawals + realized_pnl + dividends - fees) - (cash + open_total_cost_basis) == Decimal("0")` under both default 28-digit precision and 120-digit localcontext.
+  2. **Recursive Non-Finite Pre-Check in Replay Fixtures (D3):**
+     - `save_replay_fixture` recursively traverses nested mappings (keys and values) and non-string/bytes sequences via `_check_finite_values`.
+     - Raises `FixtureIntegrityError` on any nested `float` or `Decimal` that is `NaN`, `Infinity`, or `-Infinity` (including `Decimal("NaN")`).
+- **Consequences:** Live execution and ledger replay are 100% identical with zero drift; portfolio accounting invariant holds to exact zero across multi-lot partial/full round trips; replay fixtures reject non-finite inputs at arbitrary nesting depths.
+- **Verification:** 413 tests pass across the full suite on genuine Python 3.11.9 (`.venv311`) and Python 3.14.4 (`.venv`) with 87.27% test coverage, clean Ruff linting, zero compile errors, zero unbaselined secrets, and zero inline `#` comments.

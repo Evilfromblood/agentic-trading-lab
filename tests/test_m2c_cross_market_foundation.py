@@ -1596,3 +1596,52 @@ def test_r7_replay_fixture_rejects_non_finite_values_and_constants() -> None:
                 HistoricalDataRequest("INFY", Exchange.NSE, CandleInterval.M5, t0, t0 + timedelta(minutes=5))
             )
 
+
+def test_d3_save_replay_fixture_nested_non_finite_rejection() -> None:
+    t0 = datetime(2026, 11, 2, 9, 15, tzinfo=IST)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        rec_nested_nan_decimal = {
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "interval": "5m",
+            "timestamp": t0.isoformat(),
+            "nested": {"price": Decimal("NaN")},
+        }
+        resp1 = ProviderResponse(success=True, source="TEST", retrieval_timestamp=t0, records=(rec_nested_nan_decimal,))
+        with pytest.raises(FixtureIntegrityError, match="Non-finite Decimal value in fixture record"):
+            save_replay_fixture(tmpdir, "fix_nan_dec", resp1, Exchange.NSE, "INFY", CandleInterval.M5)
+
+        rec_nested_nan_float = {
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "interval": "5m",
+            "timestamp": t0.isoformat(),
+            "depth": [10.0, float("nan")],
+        }
+        resp2 = ProviderResponse(success=True, source="TEST", retrieval_timestamp=t0, records=(rec_nested_nan_float,))
+        with pytest.raises(FixtureIntegrityError, match="Non-finite float value in fixture record"):
+            save_replay_fixture(tmpdir, "fix_nan_flt", resp2, Exchange.NSE, "INFY", CandleInterval.M5)
+
+        rec_nested_inf_float = {
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "interval": "5m",
+            "timestamp": t0.isoformat(),
+            "nested_map": {"level1": {"level2": [float("inf")]}},
+        }
+        resp3 = ProviderResponse(success=True, source="TEST", retrieval_timestamp=t0, records=(rec_nested_inf_float,))
+        with pytest.raises(FixtureIntegrityError, match="Non-finite float value in fixture record"):
+            save_replay_fixture(tmpdir, "fix_inf_flt", resp3, Exchange.NSE, "INFY", CandleInterval.M5)
+
+        rec_nested_inf_dec = {
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "interval": "5m",
+            "timestamp": t0.isoformat(),
+            "tuple_vals": (1, (2, Decimal("Infinity"))),
+        }
+        resp4 = ProviderResponse(success=True, source="TEST", retrieval_timestamp=t0, records=(rec_nested_inf_dec,))
+        with pytest.raises(FixtureIntegrityError, match="Non-finite Decimal value in fixture record"):
+            save_replay_fixture(tmpdir, "fix_inf_dec", resp4, Exchange.NSE, "INFY", CandleInterval.M5)
+
+

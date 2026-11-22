@@ -2,6 +2,32 @@
 
 Append concise entries in reverse chronological order. Record verified outcomes, not intentions.
 
+## 2026-11-23 — M3 Hardening: Exact Cost Basis Parity & Recursive Non-Finite Validation (D1, D2, D3)
+- Remediated all 3 Claude adversarial audit findings (D1, D2, D3) across simulation and market data:
+  - **Unified Position Mutation & Exact Zero-Drift Math (`portfolio.py` / D1, D2)**:
+    - Refactored position mutation (`BUY` and `SELL`, long and short) into a single shared internal helper `_apply_trade_to_position(...)` called by both `apply_fill` and `_replay_ledger`, guaranteeing 100% execution parity.
+    - Maintained `self._total_cost_basis: dict[tuple[Exchange, str], Decimal]` as the single source of truth for open position basis; derived `Position.average_cost` strictly at snapshot time as `Money(basis / Decimal(abs(qty)), currency)`.
+    - Adding to position: `self._total_cost_basis[key] = self._total_cost_basis.get(key, Decimal("0")) + (Decimal(add_qty) * exec_price_amount)` without recomputing prior basis.
+    - Reducing/closing position (`reduce_qty <= abs(curr_qty)`):
+      Full close (`reduce_qty == abs(curr_qty)`): `basis_removed = curr_basis`, `new_basis = Decimal("0")`.
+      Partial close (`reduce_qty < abs(curr_qty)`): `basis_removed = ((curr_basis * Decimal(reduce_qty)) / Decimal(abs(curr_qty))).quantize(Decimal("1E-12"), rounding=ROUND_HALF_EVEN)`, `new_basis = curr_basis - basis_removed`. Realized P&L delta is `proceeds - basis_removed` for long reductions and `basis_removed - cover_cost` for short reductions.
+    - Flip trades (`quantity > abs(curr_qty)` when `allow_short=True`) close the existing side completely (`basis_removed = curr_basis`) and open the remainder on the opposite side with `new_basis = Decimal(rem_qty) * exec_price_amount`.
+    - Guaranteed that under both default 28-digit `Decimal` context and 120-digit `localcontext`, `(deposits - withdrawals + realized_pnl + dividends - fees) - (cash + open_total_cost_basis) == Decimal("0")`.
+  - **Recursive Non-Finite Pre-Check in Replay Fixtures (`replay_fixtures.py` / D3)**:
+    - Updated `save_replay_fixture` pre-serialization validation via `_check_finite_values` to recursively traverse nested `Mapping` (keys and values) and non-string/bytes sequences.
+    - Raises `FixtureIntegrityError` if any nested `float` or `Decimal` is `NaN`, `Infinity`, or `-Infinity` (including `Decimal("NaN")`).
+- **Regression Tests Added**:
+  - `test_d1_claude_multi_lot_sequence_and_fuzz_residual`: Claude's exact multi-lot sequence (`BUY 4@179.99, 2@192.87, 6@183.76, 9@192.39`, `SELL 16@60.36, 1@39.90, 1@149.33`) plus 50-step randomized multi-fill round-trip fuzz checks asserting exact `Decimal("0")` residual at both default precision and `localcontext(prec=120)`.
+  - `test_d2_partial_sell_ledger_replay_parity`: Tests partial-sell + ledger replay parity (`BUY 10@100`, `SELL 4@110`, reconstruct `PortfolioEngine(ledger=...)`, verify basis is `600`, then `SELL 6@120` and assert realized P&L is `160` on both live and replayed engines).
+  - `test_d3_save_replay_fixture_nested_non_finite_rejection`: Verifies nested `Decimal("NaN")`, nested `float("nan")`, and nested `float("inf")` inside fixture records raise `FixtureIntegrityError`.
+- **Validation results**:
+  - Pytest full suite: **413 passed in 11.21s** on Python 3.11.9 (`.venv311`) and **413 passed in 7.42s** on Python 3.14.4 (`.venv`).
+  - Genuine pytest-cov coverage: **87.27%** (exceeding mandatory `--cov-fail-under=85`).
+  - Ruff `src`, `tests`, and `v3-zerodha/src`: `All checks passed!`.
+  - Python compileall: passed with exit code 0 on both 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked files.
+  - Zero inline `#` comments verified across all new and edited files in git diff.
+
 ## 2026-11-22 — M3 Final Polish Pass: Exact Cost Basis, Positive Price Guards & Fixture Identity Verification (R1–R8)
 - Remediated all 8 Claude adversarial audit residuals (R1–R8) across simulation, risk, market data, and strategy:
   - **Simulation Costs & Fill Pricing (`costs.py`, `portfolio.py` / R1, R3)**:

@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Decimal
 
 from agentic_trading.market_data.instruments import Currency, CurrencyMismatchError, Money
 from agentic_trading.market_data.models import Exchange
@@ -112,106 +112,211 @@ class PortfolioEngine:
         if ledger is not None and ledger.entries:
             self._replay_ledger(ledger.entries)
 
+    def _apply_trade_to_position(
+        self,
+        exchange: Exchange,
+        symbol: str,
+        side: str,
+        quantity: int,
+        exec_price_amount: Decimal,
+        allow_short: bool = False,
+    ) -> None:
+        key = (exchange, symbol)
+        curr_pos = self._positions.get(key)
+        curr_qty = curr_pos.quantity if curr_pos is not None else 0
+        curr_basis = self._total_cost_basis.get(key, Decimal("0"))
+
+        if curr_qty == 0:
+            if side == "BUY":
+                new_basis = Decimal(quantity) * exec_price_amount
+                self._total_cost_basis[key] = new_basis
+                avg_cost = new_basis / Decimal(quantity)
+                self._positions[key] = Position(
+                    exchange=exchange,
+                    symbol=symbol,
+                    currency=self.currency,
+                    quantity=quantity,
+                    average_cost=Money(avg_cost, self.currency),
+                    realized_pnl=Money(self._realized_pnl_by_symbol.get(key, Decimal("0")), self.currency),
+                )
+            else:
+                if not allow_short:
+                    raise InsufficientPositionError(
+                        f"Cannot short sell {quantity} shares of {symbol}; allow_short is False"
+                    )
+                new_basis = Decimal(quantity) * exec_price_amount
+                self._total_cost_basis[key] = new_basis
+                avg_cost = new_basis / Decimal(quantity)
+                self._positions[key] = Position(
+                    exchange=exchange,
+                    symbol=symbol,
+                    currency=self.currency,
+                    quantity=-quantity,
+                    average_cost=Money(avg_cost, self.currency),
+                    realized_pnl=Money(self._realized_pnl_by_symbol.get(key, Decimal("0")), self.currency),
+                )
+        elif curr_qty > 0:
+            if side == "BUY":
+                add_cost = Decimal(quantity) * exec_price_amount
+                new_qty = curr_qty + quantity
+                new_basis = curr_basis + add_cost
+                self._total_cost_basis[key] = new_basis
+                avg_cost = new_basis / Decimal(new_qty)
+                self._positions[key] = Position(
+                    exchange=exchange,
+                    symbol=symbol,
+                    currency=self.currency,
+                    quantity=new_qty,
+                    average_cost=Money(avg_cost, self.currency),
+                    realized_pnl=Money(self._realized_pnl_by_symbol.get(key, Decimal("0")), self.currency),
+                )
+            else:
+                if quantity <= curr_qty:
+                    if quantity == curr_qty:
+                        basis_removed = curr_basis
+                        new_basis = Decimal("0")
+                        new_qty = 0
+                    else:
+                        basis_removed = (
+                            (curr_basis * Decimal(quantity)) / Decimal(curr_qty)
+                        ).quantize(Decimal("1E-12"), rounding=ROUND_HALF_EVEN)
+                        new_basis = curr_basis - basis_removed
+                        new_qty = curr_qty - quantity
+                    proceeds = Decimal(quantity) * exec_price_amount
+                    trade_pnl = proceeds - basis_removed
+                    self._realized_pnl_by_symbol[key] = (
+                        self._realized_pnl_by_symbol.get(key, Decimal("0")) + trade_pnl
+                    )
+                    if new_qty == 0:
+                        self._total_cost_basis.pop(key, None)
+                        self._positions.pop(key, None)
+                    else:
+                        self._total_cost_basis[key] = new_basis
+                        avg_cost = new_basis / Decimal(new_qty)
+                        self._positions[key] = Position(
+                            exchange=exchange,
+                            symbol=symbol,
+                            currency=self.currency,
+                            quantity=new_qty,
+                            average_cost=Money(avg_cost, self.currency),
+                            realized_pnl=Money(self._realized_pnl_by_symbol[key], self.currency),
+                        )
+                else:
+                    if not allow_short:
+                        raise InsufficientPositionError(
+                            f"Cannot sell {quantity} shares of {symbol}, current position is {curr_qty}"
+                        )
+                    basis_removed = curr_basis
+                    proceeds_long = Decimal(curr_qty) * exec_price_amount
+                    trade_pnl = proceeds_long - basis_removed
+                    self._realized_pnl_by_symbol[key] = (
+                        self._realized_pnl_by_symbol.get(key, Decimal("0")) + trade_pnl
+                    )
+                    rem_short = quantity - curr_qty
+                    new_basis = Decimal(rem_short) * exec_price_amount
+                    self._total_cost_basis[key] = new_basis
+                    avg_cost = new_basis / Decimal(rem_short)
+                    self._positions[key] = Position(
+                        exchange=exchange,
+                        symbol=symbol,
+                        currency=self.currency,
+                        quantity=-rem_short,
+                        average_cost=Money(avg_cost, self.currency),
+                        realized_pnl=Money(self._realized_pnl_by_symbol[key], self.currency),
+                    )
+        else:
+            abs_curr = abs(curr_qty)
+            if side == "SELL":
+                if not allow_short:
+                    raise InsufficientPositionError(
+                        f"Cannot short sell {quantity} shares of {symbol}; allow_short is False"
+                    )
+                add_cost = Decimal(quantity) * exec_price_amount
+                new_qty = curr_qty - quantity
+                new_basis = curr_basis + add_cost
+                self._total_cost_basis[key] = new_basis
+                avg_cost = new_basis / Decimal(abs(new_qty))
+                self._positions[key] = Position(
+                    exchange=exchange,
+                    symbol=symbol,
+                    currency=self.currency,
+                    quantity=new_qty,
+                    average_cost=Money(avg_cost, self.currency),
+                    realized_pnl=Money(self._realized_pnl_by_symbol.get(key, Decimal("0")), self.currency),
+                )
+            else:
+                if quantity <= abs_curr:
+                    if quantity == abs_curr:
+                        basis_removed = curr_basis
+                        new_basis = Decimal("0")
+                        new_qty = 0
+                    else:
+                        basis_removed = (
+                            (curr_basis * Decimal(quantity)) / Decimal(abs_curr)
+                        ).quantize(Decimal("1E-12"), rounding=ROUND_HALF_EVEN)
+                        new_basis = curr_basis - basis_removed
+                        new_qty = curr_qty + quantity
+                    cover_cost = Decimal(quantity) * exec_price_amount
+                    trade_pnl = basis_removed - cover_cost
+                    self._realized_pnl_by_symbol[key] = (
+                        self._realized_pnl_by_symbol.get(key, Decimal("0")) + trade_pnl
+                    )
+                    if new_qty == 0:
+                        self._total_cost_basis.pop(key, None)
+                        self._positions.pop(key, None)
+                    else:
+                        self._total_cost_basis[key] = new_basis
+                        avg_cost = new_basis / Decimal(abs(new_qty))
+                        self._positions[key] = Position(
+                            exchange=exchange,
+                            symbol=symbol,
+                            currency=self.currency,
+                            quantity=new_qty,
+                            average_cost=Money(avg_cost, self.currency),
+                            realized_pnl=Money(self._realized_pnl_by_symbol[key], self.currency),
+                        )
+                else:
+                    basis_removed = curr_basis
+                    cover_cost = Decimal(abs_curr) * exec_price_amount
+                    trade_pnl = basis_removed - cover_cost
+                    self._realized_pnl_by_symbol[key] = (
+                        self._realized_pnl_by_symbol.get(key, Decimal("0")) + trade_pnl
+                    )
+                    rem_long = quantity - abs_curr
+                    new_basis = Decimal(rem_long) * exec_price_amount
+                    self._total_cost_basis[key] = new_basis
+                    avg_cost = new_basis / Decimal(rem_long)
+                    self._positions[key] = Position(
+                        exchange=exchange,
+                        symbol=symbol,
+                        currency=self.currency,
+                        quantity=rem_long,
+                        average_cost=Money(avg_cost, self.currency),
+                        realized_pnl=Money(self._realized_pnl_by_symbol[key], self.currency),
+                    )
+
     def _replay_ledger(self, entries: tuple[LedgerEntry, ...]) -> None:
         for entry in entries:
             if entry.currency != self.currency:
                 continue
-            if entry.event_type == LedgerEventType.BUY_FILL and entry.exchange and entry.symbol:
-                key = (entry.exchange, entry.symbol)
-                curr = self._positions.get(key)
-                curr_qty = curr.quantity if curr else 0
-                curr_avg = curr.average_cost.amount if curr else Decimal("0")
-                price = entry.execution_price.amount if entry.execution_price else Decimal("0")
-                qty = entry.quantity_delta
-                if curr_qty < 0:
-                    covering = min(qty, abs(curr_qty))
-                    pnl = (curr_avg - price) * Decimal(covering)
-                    self._realized_pnl_by_symbol[key] = self._realized_pnl_by_symbol.get(key, Decimal("0")) + pnl
-                    rem = qty - covering
-                    if rem == 0:
-                        new_q = curr_qty + covering
-                        if new_q == 0:
-                            self._positions.pop(key, None)
-                        else:
-                            self._positions[key] = Position(
-                                entry.exchange,
-                                entry.symbol,
-                                self.currency,
-                                new_q,
-                                Money(curr_avg, self.currency),
-                                Money(self._realized_pnl_by_symbol[key], self.currency),
-                            )
-                    else:
-                        self._positions[key] = Position(
-                            entry.exchange,
-                            entry.symbol,
-                            self.currency,
-                            rem,
-                            Money(price, self.currency),
-                            Money(self._realized_pnl_by_symbol[key], self.currency),
-                        )
-                else:
-                    new_q = curr_qty + qty
-                    prior_cost = curr_avg * Decimal(curr_qty)
-                    add_cost = price * Decimal(qty)
-                    new_avg = (prior_cost + add_cost) / Decimal(new_q) if new_q > 0 else Decimal("0")
-                    self._total_cost_basis[key] = prior_cost + add_cost
-                    self._positions[key] = Position(
-                        entry.exchange,
-                        entry.symbol,
-                        self.currency,
-                        new_q,
-                        Money(new_avg, self.currency),
-                        Money(self._realized_pnl_by_symbol.get(key, Decimal("0")), self.currency),
-                    )
-            elif entry.event_type == LedgerEventType.SELL_FILL and entry.exchange and entry.symbol:
-                key = (entry.exchange, entry.symbol)
-                curr = self._positions.get(key)
-                curr_qty = curr.quantity if curr else 0
-                curr_avg = curr.average_cost.amount if curr else Decimal("0")
-                price = entry.execution_price.amount if entry.execution_price else Decimal("0")
-                qty = abs(entry.quantity_delta)
-                if curr_qty <= 0:
-                    exist_cost = curr_avg * abs(Decimal(curr_qty))
-                    add_cost = price * Decimal(qty)
-                    new_q = curr_qty - qty
-                    new_avg = (exist_cost + add_cost) / abs(Decimal(new_q)) if new_q != 0 else Decimal("0")
-                    self._positions[key] = Position(
-                        entry.exchange,
-                        entry.symbol,
-                        self.currency,
-                        new_q,
-                        Money(new_avg, self.currency),
-                        Money(self._realized_pnl_by_symbol.get(key, Decimal("0")), self.currency),
-                    )
-                else:
-                    if qty > curr_qty:
-                        pnl = (price - curr_avg) * Decimal(curr_qty)
-                        self._realized_pnl_by_symbol[key] = self._realized_pnl_by_symbol.get(key, Decimal("0")) + pnl
-                        rem = qty - curr_qty
-                        self._positions[key] = Position(
-                            entry.exchange,
-                            entry.symbol,
-                            self.currency,
-                            -rem,
-                            Money(price, self.currency),
-                            Money(self._realized_pnl_by_symbol[key], self.currency),
-                        )
-                    else:
-                        pnl = (price - curr_avg) * Decimal(qty)
-                        self._realized_pnl_by_symbol[key] = self._realized_pnl_by_symbol.get(key, Decimal("0")) + pnl
-                        new_q = curr_qty - qty
-                        if new_q == 0:
-                            self._positions.pop(key, None)
-                        else:
-                            self._positions[key] = Position(
-                                entry.exchange,
-                                entry.symbol,
-                                self.currency,
-                                new_q,
-                                Money(curr_avg, self.currency),
-                                Money(self._realized_pnl_by_symbol[key], self.currency),
-                            )
+            if entry.event_type == LedgerEventType.BUY_FILL and entry.exchange and entry.symbol and entry.execution_price:
+                self._apply_trade_to_position(
+                    exchange=entry.exchange,
+                    symbol=entry.symbol,
+                    side="BUY",
+                    quantity=entry.quantity_delta,
+                    exec_price_amount=entry.execution_price.amount,
+                    allow_short=True,
+                )
+            elif entry.event_type == LedgerEventType.SELL_FILL and entry.exchange and entry.symbol and entry.execution_price:
+                self._apply_trade_to_position(
+                    exchange=entry.exchange,
+                    symbol=entry.symbol,
+                    side="SELL",
+                    quantity=abs(entry.quantity_delta),
+                    exec_price_amount=entry.execution_price.amount,
+                    allow_short=True,
+                )
 
     def deposit(self, amount: Money, timestamp: datetime, reference_id: str = "") -> LedgerEntry:
         if not isinstance(amount, Money):
@@ -325,11 +430,6 @@ class PortfolioEngine:
         slipped_price = self.slippage_model.calculate_slippage(execution_price, clean_side, tick_size)
         fee = self.fee_model.calculate_fees(exchange, clean_symbol, clean_side, quantity, slipped_price)
 
-        key = (exchange, clean_symbol)
-        curr_pos = self._positions.get(key)
-        curr_qty = curr_pos.quantity if curr_pos is not None else 0
-        curr_avg = curr_pos.average_cost.amount if curr_pos is not None else Decimal("0")
-
         if clean_side == "BUY":
             fill_cost = slipped_price.amount * Decimal(quantity)
             total_required_cash = fill_cost + fee.amount
@@ -339,6 +439,15 @@ class PortfolioEngine:
                 raise InsufficientFundsError(
                     f"Insufficient cash for BUY fill: required {total_required_cash}, available {avail_cash.amount}"
                 )
+
+            self._apply_trade_to_position(
+                exchange=exchange,
+                symbol=clean_symbol,
+                side="BUY",
+                quantity=quantity,
+                exec_price_amount=slipped_price.amount,
+                allow_short=allow_short,
+            )
 
             fill_entry = self.ledger.append(
                 timestamp=timestamp,
@@ -364,49 +473,6 @@ class PortfolioEngine:
                     reference_id=reference_id,
                 )
 
-            if curr_qty < 0:
-                covering = min(quantity, abs(curr_qty))
-                short_pnl = (curr_avg - slipped_price.amount) * Decimal(covering)
-                self._realized_pnl_by_symbol[key] = self._realized_pnl_by_symbol.get(key, Decimal("0")) + short_pnl
-                rem = quantity - covering
-                if rem == 0:
-                    new_q = curr_qty + covering
-                    if new_q == 0:
-                        self._positions.pop(key, None)
-                    else:
-                        self._positions[key] = Position(
-                            exchange=exchange,
-                            symbol=clean_symbol,
-                            currency=self.currency,
-                            quantity=new_q,
-                            average_cost=Money(curr_avg, self.currency),
-                            realized_pnl=Money(self._realized_pnl_by_symbol[key], self.currency),
-                        )
-                else:
-                    self._positions[key] = Position(
-                        exchange=exchange,
-                        symbol=clean_symbol,
-                        currency=self.currency,
-                        quantity=rem,
-                        average_cost=slipped_price,
-                        realized_pnl=Money(self._realized_pnl_by_symbol[key], self.currency),
-                    )
-            else:
-                new_q = curr_qty + quantity
-                prior_cost = curr_avg * Decimal(curr_qty)
-                add_cost = fill_cost
-                new_total_basis = prior_cost + add_cost
-                new_avg = new_total_basis / Decimal(new_q)
-                self._total_cost_basis[key] = new_total_basis
-                self._positions[key] = Position(
-                    exchange=exchange,
-                    symbol=clean_symbol,
-                    currency=self.currency,
-                    quantity=new_q,
-                    average_cost=Money(new_avg, self.currency),
-                    realized_pnl=Money(self._realized_pnl_by_symbol.get(key, Decimal("0")), self.currency),
-                )
-
             return fill_entry, fee_entry
 
         proceeds = slipped_price.amount * Decimal(quantity)
@@ -417,62 +483,14 @@ class PortfolioEngine:
                 f"Insufficient funds for SELL fee: cash {avail_cash.amount} + proceeds {proceeds} < fee {fee.amount}"
             )
 
-        if curr_qty <= 0:
-            if not allow_short:
-                raise InsufficientPositionError(
-                    f"Cannot short sell {quantity} shares of {clean_symbol}; allow_short is False"
-                )
-            exist_cost = curr_avg * abs(Decimal(curr_qty))
-            add_cost = proceeds
-            new_q = curr_qty - quantity
-            new_avg = (exist_cost + add_cost) / abs(Decimal(new_q))
-            self._positions[key] = Position(
-                exchange=exchange,
-                symbol=clean_symbol,
-                currency=self.currency,
-                quantity=new_q,
-                average_cost=Money(new_avg, self.currency),
-                realized_pnl=Money(self._realized_pnl_by_symbol.get(key, Decimal("0")), self.currency),
-            )
-        else:
-            if quantity > curr_qty:
-                if not allow_short:
-                    raise InsufficientPositionError(
-                        f"Cannot sell {quantity} shares of {clean_symbol}, current position is {curr_qty}"
-                    )
-                long_pnl = (slipped_price.amount - curr_avg) * Decimal(curr_qty)
-                self._realized_pnl_by_symbol[key] = self._realized_pnl_by_symbol.get(key, Decimal("0")) + long_pnl
-                rem_short = quantity - curr_qty
-                self._positions[key] = Position(
-                    exchange=exchange,
-                    symbol=clean_symbol,
-                    currency=self.currency,
-                    quantity=-rem_short,
-                    average_cost=slipped_price,
-                    realized_pnl=Money(self._realized_pnl_by_symbol[key], self.currency),
-                )
-            else:
-                curr_basis = self._total_cost_basis.get(key, curr_avg * Decimal(curr_qty))
-                if quantity >= curr_qty:
-                    basis_removed = curr_basis
-                else:
-                    basis_removed = (curr_basis * Decimal(quantity)) / Decimal(curr_qty)
-                trade_pnl = slipped_price.amount * Decimal(quantity) - basis_removed
-                self._realized_pnl_by_symbol[key] = self._realized_pnl_by_symbol.get(key, Decimal("0")) + trade_pnl
-                new_q = curr_qty - quantity
-                if new_q == 0:
-                    self._total_cost_basis.pop(key, None)
-                    self._positions.pop(key, None)
-                else:
-                    self._total_cost_basis[key] = curr_basis - basis_removed
-                    self._positions[key] = Position(
-                        exchange=exchange,
-                        symbol=clean_symbol,
-                        currency=self.currency,
-                        quantity=new_q,
-                        average_cost=Money(curr_avg, self.currency),
-                        realized_pnl=Money(self._realized_pnl_by_symbol[key], self.currency),
-                    )
+        self._apply_trade_to_position(
+            exchange=exchange,
+            symbol=clean_symbol,
+            side="SELL",
+            quantity=quantity,
+            exec_price_amount=slipped_price.amount,
+            allow_short=allow_short,
+        )
 
         fill_entry = self.ledger.append(
             timestamp=timestamp,
@@ -516,6 +534,7 @@ class PortfolioEngine:
         unrealized = Decimal("0")
         realized = sum(self._realized_pnl_by_symbol.values(), Decimal("0"))
 
+        positions_dict: dict[tuple[Exchange, str], Position] = {}
         for key, pos in self._positions.items():
             if pos.quantity != 0:
                 mark = mark_prices.get(key)
@@ -525,11 +544,22 @@ class PortfolioEngine:
                     raise CurrencyMismatchError(
                         f"Mark price currency {mark.currency} mismatch with portfolio {self.currency}"
                     )
+                basis = self._total_cost_basis.get(key, Decimal("0"))
+                avg_cost_amount = basis / Decimal(abs(pos.quantity))
+                pos_with_avg = Position(
+                    exchange=pos.exchange,
+                    symbol=pos.symbol,
+                    currency=pos.currency,
+                    quantity=pos.quantity,
+                    average_cost=Money(avg_cost_amount, self.currency),
+                    realized_pnl=Money(self._realized_pnl_by_symbol.get(key, Decimal("0")), self.currency),
+                )
+                positions_dict[key] = pos_with_avg
                 hv = mark.amount * Decimal(pos.quantity)
                 if pos.quantity > 0:
-                    ur = (mark.amount - pos.average_cost.amount) * Decimal(pos.quantity)
+                    ur = mark.amount * Decimal(pos.quantity) - basis
                 else:
-                    ur = (pos.average_cost.amount - mark.amount) * abs(Decimal(pos.quantity))
+                    ur = basis - mark.amount * abs(Decimal(pos.quantity))
                 holdings_val += hv
                 unrealized += ur
 
@@ -543,5 +573,5 @@ class PortfolioEngine:
             total_equity=Money(tot_equity, self.currency),
             realized_pnl=Money(realized, self.currency),
             unrealized_pnl=Money(unrealized, self.currency),
-            positions=dict(self._positions),
+            positions=positions_dict,
         )

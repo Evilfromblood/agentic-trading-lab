@@ -82,12 +82,14 @@ All 338 tests pass across the test suite on both genuine Python 3.11.9 (`.venv31
 
 ---
 
-## 5. Milestone 3 Final Polish Pass (R1–R8) Summary
+## 5. Milestone 3 Final Polish Pass (R1–R8) & Audit Hardening (D1–D3) Summary
 
-Milestone 3 establishes the append-only ledger, multi-currency portfolio solvency, statutory cost models, point-in-time universe guards, strategy contracts, deterministic risk gate, and cross-market foundation. The Final Polish Pass resolves all 8 adversarial audit residuals (R1–R8):
+Milestone 3 establishes the append-only ledger, multi-currency portfolio solvency, statutory cost models, point-in-time universe guards, strategy contracts, deterministic risk gate, and cross-market foundation. The Final Polish Pass and Hardening resolve all audit findings:
 
 | Item | Area | Description & Resolution | Verification Test |
 |---|---|---|---|
+| **D1 & D2** | Portfolio Accounting | Position mutation unified in `_apply_trade_to_position` across live `apply_fill` and `_replay_ledger`. Exact zero-drift math (`_total_cost_basis`) with `ROUND_HALF_EVEN` 1E-12 basis removal guarantees exact `Decimal("0")` conservation residual across arbitrary multi-lot fills under 28-digit precision and 120-digit localcontext, and 100% parity on replay. | `tests/test_m3_simulation_and_risk.py::test_d1_claude_multi_lot_sequence_and_fuzz_residual`<br>`tests/test_m3_simulation_and_risk.py::test_d2_partial_sell_ledger_replay_parity` |
+| **D3** | Replay Fixtures | `save_replay_fixture` recursively traverses nested mappings (keys and values) and sequences via `_check_finite_values`, raising `FixtureIntegrityError` if any nested float or Decimal is `NaN`, `Infinity`, or `-Infinity`. | `tests/test_m2c_cross_market_foundation.py::test_d3_save_replay_fixture_nested_non_finite_rejection` |
 | **R1 & R3** | Costs & Pricing | `calculate_slippage` and `apply_fill` reject `price <= 0` with `ValueError`. When adverse `ROUND_FLOOR` on sell reduces effective price below `tick_size` (or `<= 0`), raises `ValueError` rather than clamping upward. | `tests/test_m3_simulation_and_risk.py::test_r1_slippage_and_fill_price_positive_rejection`<br>`tests/test_m3_simulation_and_risk.py::test_r3_slippage_sell_below_tick_size_rejection` |
 | **R2** | Portfolio Accounting | Exact per-position cost basis tracking (`_total_cost_basis`) eliminates fractional cent drift on partial and full liquidations, guaranteeing exact zero residual drift (`Decimal("0")`). | `tests/test_m3_simulation_and_risk.py::test_r2_exact_zero_drift_conservation_residual` |
 | **R4 & R8** | Proposal Risk Gate | Directional checks on long exits: `stop_loss < entry_price` and `take_profit > entry_price`. Detects exact full exits (`proposal.quantity == held_qty`), permitting odd-lot full liquidations without `LOT_SIZE_MISMATCH` or truncation. | `tests/test_m3_simulation_and_risk.py::test_r4_proposal_gate_long_exit_stop_loss_take_profit_direction`<br>`tests/test_m3_simulation_and_risk.py::test_r8_proposal_gate_odd_lot_full_exit_allowed` |
@@ -96,8 +98,8 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 | **R7** | Strategy & Actions | `BarContext` enforces non-overlapping bars (`timestamp < prev_close`). Replay fixtures reject non-finite float/Decimal and parse constants. Corporate actions deduplicate identical actions and resolve lineage iteratively (>1500 hops). | `tests/test_m3_simulation_and_risk.py::test_r7_bar_context_overlapping_bars_rejection`<br>`tests/test_m2c_cross_market_foundation.py::test_r7_corporate_actions_dedup_and_deep_lineage`<br>`tests/test_m2c_cross_market_foundation.py::test_r7_replay_fixture_rejects_non_finite_values_and_constants` |
 
 ### Suite Verification:
-- **Pytest:** 410 passed in 4.34s on Python 3.11 (`.venv311`), 410 passed in 1.88s on Python 3.14 (`.venv`).
-- **Coverage:** **87.40%** (exceeds `--cov-fail-under=85`).
+- **Pytest:** 413 passed in 11.21s on Python 3.11 (`.venv311`), 413 passed in 7.42s on Python 3.14 (`.venv`).
+- **Coverage:** **87.27%** (exceeds `--cov-fail-under=85`).
 - **Ruff & Compileall:** All clean, exit code 0.
 - **Secrets:** 0 leaks detected against `.secrets.baseline`.
 - **Inline `#` Comments:** 0 in git diff.

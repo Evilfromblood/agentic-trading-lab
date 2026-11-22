@@ -6,7 +6,7 @@ import hmac
 import json
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
@@ -34,6 +34,32 @@ class FixtureIntegrityError(ValueError):
 
 def _reject_constant(val: str) -> Any:
     raise FixtureIntegrityError(f"Non-finite JSON constant not allowed: {val}")
+
+
+def _check_finite_values(obj: Any, _seen: set[int] | None = None) -> None:
+    if isinstance(obj, float) and not math.isfinite(obj):
+        raise FixtureIntegrityError(f"Non-finite float value in fixture record: {obj}")
+    if isinstance(obj, Decimal) and not obj.is_finite():
+        raise FixtureIntegrityError(f"Non-finite Decimal value in fixture record: {obj}")
+    if isinstance(obj, Mapping):
+        seen = _seen if _seen is not None else set()
+        obj_id = id(obj)
+        if obj_id in seen:
+            return
+        seen.add(obj_id)
+        for k, v in obj.items():
+            _check_finite_values(k, seen)
+            _check_finite_values(v, seen)
+    elif isinstance(obj, (list, tuple)) or (
+        isinstance(obj, Sequence) and not isinstance(obj, (str, bytes, bytearray))
+    ):
+        seen = _seen if _seen is not None else set()
+        obj_id = id(obj)
+        if obj_id in seen:
+            return
+        seen.add(obj_id)
+        for item in obj:
+            _check_finite_values(item, seen)
 
 
 def _json_default(obj: Any) -> Any:
@@ -182,15 +208,7 @@ def save_replay_fixture(
 
     key_bytes = _to_key_bytes(hmac_key)
     for _rec in response.records:
-        for _v in (_rec.values() if isinstance(_rec, Mapping) else _rec):
-            if isinstance(_v, float) and not math.isfinite(_v):
-                raise FixtureIntegrityError(
-                    f"Non-finite float value in fixture record: {_v}"
-                )
-            if isinstance(_v, Decimal) and not _v.is_finite():
-                raise FixtureIntegrityError(
-                    f"Non-finite Decimal value in fixture record: {_v}"
-                )
+        _check_finite_values(_rec)
     payload_json = json.dumps(
         list(response.records),
         sort_keys=True,

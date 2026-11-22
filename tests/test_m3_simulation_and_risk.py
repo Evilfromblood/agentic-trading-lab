@@ -1,8 +1,9 @@
 """Adversarial tests for Milestone 3 simulation, portfolio, strategy contracts, and risk gate."""
 from __future__ import annotations
 
+import random
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Context, Decimal, localcontext
 
 import pytest
 
@@ -1632,5 +1633,121 @@ def test_r8_proposal_gate_odd_lot_full_exit_allowed() -> None:
     dec_part = evaluate_trade_proposal(prop_partial, portfolio, entry, policy, pnl, peak)
     assert dec_part.approved is False
     assert "LOT_SIZE_MISMATCH" in dec_part.reasons
+
+
+def test_d1_claude_multi_lot_sequence_and_fuzz_residual() -> None:
+    engine = PortfolioEngine(Currency.USD)
+    t0 = datetime(2026, 11, 2, 9, 30, tzinfo=timezone.utc)
+    engine.deposit(Money(Decimal("1000000.00"), Currency.USD), t0)
+
+    fills = [
+        ("BUY", 4, Decimal("179.99")),
+        ("BUY", 2, Decimal("192.87")),
+        ("BUY", 6, Decimal("183.76")),
+        ("BUY", 9, Decimal("192.39")),
+        ("SELL", 16, Decimal("60.36")),
+        ("SELL", 1, Decimal("39.90")),
+        ("SELL", 1, Decimal("149.33")),
+    ]
+
+    t = t0
+    for side, qty, price in fills:
+        t += timedelta(minutes=1)
+        engine.apply_fill(
+            timestamp=t,
+            exchange=Exchange.NASDAQ,
+            symbol="AAPL",
+            side=side,
+            quantity=qty,
+            execution_price=Money(price, Currency.USD),
+        )
+
+    def calc_residual(eng: PortfolioEngine) -> Decimal:
+        cash = eng.ledger.get_cash_balance(Currency.USD).amount
+        dep = eng.ledger.get_total_deposits(Currency.USD).amount
+        withd = eng.ledger.get_total_withdrawals(Currency.USD).amount
+        realized = sum(eng._realized_pnl_by_symbol.values(), Decimal("0"))
+        div = eng.ledger.get_total_dividends(Currency.USD).amount
+        fees = eng.ledger.get_total_fees(Currency.USD).amount
+        open_b = sum(eng._total_cost_basis.values(), Decimal("0"))
+        return (dep - withd + realized + div - fees) - (cash + open_b)
+
+    assert calc_residual(engine) == Decimal("0")
+
+    with localcontext(Context(prec=120)):
+        assert calc_residual(engine) == Decimal("0")
+
+    fuzz_engine = PortfolioEngine(Currency.USD)
+    fuzz_engine.deposit(Money(Decimal("500000.00"), Currency.USD), t0)
+    rng = random.Random(42)
+    cur_t = t0
+    held_qty = 0
+
+    for _ in range(50):
+        cur_t += timedelta(minutes=1)
+        if held_qty == 0 or rng.choice(["BUY", "BUY", "SELL"]) == "BUY":
+            buy_q = rng.randint(1, 25)
+            buy_p = Decimal(str(rng.randint(10, 500))) + Decimal(str(rng.randint(1, 99))) / Decimal("100")
+            fuzz_engine.apply_fill(
+                timestamp=cur_t,
+                exchange=Exchange.NASDAQ,
+                symbol="MSFT",
+                side="BUY",
+                quantity=buy_q,
+                execution_price=Money(buy_p, Currency.USD),
+            )
+            held_qty += buy_q
+        else:
+            sell_q = rng.randint(1, held_qty)
+            sell_p = Decimal(str(rng.randint(10, 500))) + Decimal(str(rng.randint(1, 99))) / Decimal("100")
+            fuzz_engine.apply_fill(
+                timestamp=cur_t,
+                exchange=Exchange.NASDAQ,
+                symbol="MSFT",
+                side="SELL",
+                quantity=sell_q,
+                execution_price=Money(sell_p, Currency.USD),
+            )
+            held_qty -= sell_q
+
+        assert calc_residual(fuzz_engine) == Decimal("0")
+        with localcontext(Context(prec=120)):
+            assert calc_residual(fuzz_engine) == Decimal("0")
+
+
+def test_d2_partial_sell_ledger_replay_parity() -> None:
+    live = PortfolioEngine(Currency.USD)
+    t0 = datetime(2026, 11, 2, 9, 30, tzinfo=timezone.utc)
+    live.deposit(Money(Decimal("10000.00"), Currency.USD), t0)
+
+    t1 = t0 + timedelta(minutes=1)
+    live.apply_fill(t1, Exchange.NASDAQ, "AAPL", "BUY", 10, Money(Decimal("100.00"), Currency.USD))
+
+    t2 = t1 + timedelta(minutes=1)
+    live.apply_fill(t2, Exchange.NASDAQ, "AAPL", "SELL", 4, Money(Decimal("110.00"), Currency.USD))
+
+    key = (Exchange.NASDAQ, "AAPL")
+    assert live._total_cost_basis[key] == Decimal("600.00")
+    assert live._positions[key].quantity == 6
+    assert live._positions[key].average_cost == Money(Decimal("100.00"), Currency.USD)
+    assert live._realized_pnl_by_symbol[key] == Decimal("40.00")
+
+    replayed = PortfolioEngine(Currency.USD, ledger=live.ledger)
+    assert replayed._total_cost_basis[key] == Decimal("600.00")
+    assert replayed._positions[key].quantity == 6
+    assert replayed._positions[key].average_cost == Money(Decimal("100.00"), Currency.USD)
+    assert replayed._realized_pnl_by_symbol[key] == Decimal("40.00")
+
+    t3 = t2 + timedelta(minutes=1)
+    live.apply_fill(t3, Exchange.NASDAQ, "AAPL", "SELL", 6, Money(Decimal("120.00"), Currency.USD))
+    replayed.apply_fill(t3, Exchange.NASDAQ, "AAPL", "SELL", 6, Money(Decimal("120.00"), Currency.USD))
+
+    assert live._realized_pnl_by_symbol[key] == Decimal("160.00")
+    assert replayed._realized_pnl_by_symbol[key] == Decimal("160.00")
+    assert key not in live._positions
+    assert key not in replayed._positions
+    assert key not in live._total_cost_basis
+    assert key not in replayed._total_cost_basis
+
 
 
