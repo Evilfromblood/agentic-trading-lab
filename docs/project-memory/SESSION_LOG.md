@@ -2,6 +2,38 @@
 
 Append concise entries in reverse chronological order. Record verified outcomes, not intentions.
 
+## 2026-11-22 — M3 Final Polish Pass: Exact Cost Basis, Positive Price Guards & Fixture Identity Verification (R1–R8)
+- Remediated all 8 Claude adversarial audit residuals (R1–R8) across simulation, risk, market data, and strategy:
+  - **Simulation Costs & Fill Pricing (`costs.py`, `portfolio.py` / R1, R3)**:
+    - Enforced strictly positive prices in `BasisPointsSlippageModel.calculate_slippage` and `PortfolioEngine.apply_fill` (`price.amount <= Decimal("0")` raises `ValueError`).
+    - In `BasisPointsSlippageModel`, when adverse `ROUND_FLOOR` on `SELL` reduces effective price below `tick_size` (or `<= 0`), raises `ValueError("Effective sell price falls below minimum tick size")` instead of clamping upward.
+  - **Exact Zero-Drift Cost Basis & Conservation Residual (`portfolio.py` / R1, R2)**:
+    - Tracked exact per-position total cost basis (`_total_cost_basis`) across `apply_fill` and `_replay_ledger`.
+    - On partial reductions, computed `basis_removed = (total_cost_basis * Decimal(quantity)) / Decimal(curr_qty)`, subtracted from tracked basis, and deducted from proceeds to produce `trade_pnl`.
+    - On full position exits, exact remaining tracked basis is removed (`_total_cost_basis.pop(key)`), guaranteeing exact zero residual drift (`Decimal("0")`) across multi-lot partial and full round trips.
+  - **Proposal Gate Long-Exit Direction & Odd-Lot Liquidation (`proposal_gate.py` / R4, R8)**:
+    - For `SELL` exits of held long positions (`held_qty > 0`), strictly enforced directional bounds: `stop_loss.amount < entry_price` (`INVALID_STOP_LOSS_DIRECTION`) and `take_profit.amount > entry_price` (`INVALID_TAKE_PROFIT_DIRECTION`).
+    - Detected `is_exact_full_exit = (proposal.side == "SELL" and held_qty > 0 and proposal.quantity == held_qty)`. Allowed odd-lot full liquidations without `LOT_SIZE_MISMATCH` and bypassed lot-size truncation in `max_allowed_quantity`.
+  - **Replay Fixture Cryptographic Identity & Naive Timestamp Rejection (`replay_fixtures.py` / R5)**:
+    - Verified `manifest.fixture_id == self._fixture_id` on load, raising `FixtureIntegrityError("Fixture identity mismatch")` on tampering.
+    - Rejected timezone-naive `recorded_at` in manifest with `FixtureIntegrityError("timezone-naive")`.
+  - **Synthetic Provider Strict Filter & Look-Ahead Slicing (`provider.py` / R6)**:
+    - In `SyntheticMarketDataProvider.fetch_historical` and `fetch_latest`, strictly validated matching `symbol`, `exchange`, and `interval` (failing closed on mismatches), and sliced records strictly on `rec_close <= request.end_time` and `rec_close <= now` to eliminate in-progress bar leakage.
+  - **BarContext Non-Overlapping Invariant & Non-Finite JSON Rejection (`contracts.py`, `replay_fixtures.py` / R7)**:
+    - `BarContext.__post_init__` enforces non-overlapping bars (`candle.timestamp < prev_candle.close_time` raises `ValueError`).
+    - `save_replay_fixture` rejects non-finite `float` and `Decimal` (`NaN`, `Infinity`). `json.loads` rejects non-standard JSON constants with `parse_constant=_reject_constant`.
+  - **Iterative Corporate Action Lineage & Deduplication (`corporate_actions.py` / R7)**:
+    - Deduplicated identical corporate actions in `adjust_candles_for_corporate_actions` across `(exchange, symbol, action_type, effective_date, adjustment_factor, new_symbol)`.
+    - Replaced recursive DFS in `resolve_symbol_lineage` with iterative three-color cycle detection to safely handle arbitrary lineage depths (>1,500 hops).
+- **Regression Test Coverage**: Added 10 new regression tests across `test_m3_simulation_and_risk.py` (6 tests) and `test_m2c_cross_market_foundation.py` (4 tests).
+- **Validation results**:
+  - Pytest full suite: **410 passed in 4.34s** on Python 3.11.9 (`.venv311`) and **410 passed in 1.88s** on Python 3.14.4 (`.venv`).
+  - Genuine pytest-cov coverage: **87.40%** (exceeding mandatory `--cov-fail-under=85`).
+  - Ruff `src`, `tests`, and `v3-zerodha/src`: `All checks passed!`.
+  - Python compileall: passed with exit code 0 on both 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked files.
+  - Zero inline `#` comments verified across all new and edited files in git diff.
+
 ## 2026-11-22 — M3 Hardening Batch A: Accounting Conservation, Tick-Grid Costs & Position-Aware Risk Gate
 - Implemented full M3 Hardening Batch A remediations across 4 core areas:
   - **Accounting Ledger (`ledger.py`)**:

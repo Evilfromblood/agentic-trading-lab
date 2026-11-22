@@ -314,24 +314,23 @@ class SyntheticMarketDataProvider(MarketDataProvider):
         # Filter stored records strictly by request parameters (symbol, exchange, interval, and [start_time, end_time))
         matched: list[Mapping[str, Any]] = []
         for r in self._records:
-            # Symbol filter: reject mismatched symbol or blank symbol string
             r_sym = r.get("symbol")
-            if r_sym is not None and str(r_sym).strip().upper() != request.symbol:
+            if r_sym is None or str(r_sym).strip().upper() != request.symbol:
                 continue
 
-            # Exchange filter (if present in record)
             r_ex = r.get("exchange")
-            if r_ex is not None:
-                ex_val = r_ex.value if isinstance(r_ex, Exchange) else str(r_ex).strip().upper()
-                if ex_val != request.exchange.value:
-                    continue
+            if r_ex is None:
+                continue
+            ex_val = r_ex.value if isinstance(r_ex, Exchange) else str(r_ex).strip().upper()
+            if ex_val != request.exchange.value:
+                continue
 
-            # Interval filter (if present in record)
             r_iv = r.get("interval")
-            if r_iv is not None:
-                iv_val = r_iv.value if isinstance(r_iv, CandleInterval) else str(r_iv).strip()
-                if iv_val != request.interval.value:
-                    continue
+            if r_iv is None:
+                continue
+            iv_val = r_iv.value if isinstance(r_iv, CandleInterval) else str(r_iv).strip()
+            if iv_val != request.interval.value:
+                continue
 
             # Time range filter using candle convention [start_time, end_time) and rec_close <= end_time
             rec_ts = _parse_synthetic_record_timestamp(r)
@@ -370,17 +369,24 @@ class SyntheticMarketDataProvider(MarketDataProvider):
         clean_target_sym = symbol.strip().upper()
         for r in self._records:
             r_sym = r.get("symbol")
-            if r_sym is not None and str(r_sym).strip().upper() != clean_target_sym:
+            if r_sym is None or str(r_sym).strip().upper() != clean_target_sym:
                 continue
             r_ex = r.get("exchange")
-            if r_ex is not None:
-                ex_val = r_ex.value if isinstance(r_ex, Exchange) else str(r_ex).strip().upper()
-                if ex_val != exchange.value:
-                    continue
+            if r_ex is None:
+                continue
+            ex_val = r_ex.value if isinstance(r_ex, Exchange) else str(r_ex).strip().upper()
+            if ex_val != exchange.value:
+                continue
             r_iv = r.get("interval")
-            if r_iv is not None:
-                iv_val = r_iv.value if isinstance(r_iv, CandleInterval) else str(r_iv).strip()
-                if iv_val != interval.value:
+            if r_iv is None:
+                continue
+            iv_val = r_iv.value if isinstance(r_iv, CandleInterval) else str(r_iv).strip()
+            if iv_val != interval.value:
+                continue
+            rec_ts_fl = _parse_synthetic_record_timestamp(r)
+            if rec_ts_fl is not None and rec_ts_fl.tzinfo is not None:
+                rec_close_fl = _calculate_synthetic_close_time(rec_ts_fl, interval, exchange=exchange)
+                if now is not None and rec_close_fl > now:
                     continue
             matched.append(r)
 

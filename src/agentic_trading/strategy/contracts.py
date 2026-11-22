@@ -82,6 +82,11 @@ class BarContext:
                         f"Bars must have strictly increasing timestamps: "
                         f"{candle.timestamp.isoformat()} <= {prev_candle.timestamp.isoformat()}"
                     )
+                if candle.timestamp < prev_candle.close_time:
+                    raise ValueError(
+                        f"Overlapping bars: bar timestamp {candle.timestamp.isoformat()} "
+                        f"is before previous bar close_time {prev_candle.close_time.isoformat()}"
+                    )
             prev_candle = candle
 
 

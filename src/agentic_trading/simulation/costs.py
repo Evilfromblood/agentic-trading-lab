@@ -207,6 +207,8 @@ class BasisPointsSlippageModel(SlippageModel):
     def calculate_slippage(self, price: Money, side: str, tick_size: Decimal) -> Money:
         if not isinstance(price, Money):
             raise TypeError(f"price must be a Money instance, got {type(price).__name__}")
+        if price.amount <= Decimal("0"):
+            raise ValueError(f"Price must be strictly positive, got {price.amount}")
         if (
             isinstance(tick_size, (bool, float))
             or not isinstance(tick_size, Decimal)
@@ -227,6 +229,10 @@ class BasisPointsSlippageModel(SlippageModel):
         else:
             effective = price.amount * (Decimal("1") - factor)
             ticks = (effective / tick_size).to_integral_value(rounding=ROUND_FLOOR)
-            q_effective = max(tick_size, ticks * tick_size)
+            q_effective = ticks * tick_size
+            if q_effective < tick_size:
+                raise ValueError(
+                    f"Effective sell price {q_effective} falls below minimum tick size {tick_size}"
+                )
 
         return Money(q_effective, price.currency)

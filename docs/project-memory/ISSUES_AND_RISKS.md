@@ -302,3 +302,34 @@ Last reviewed: 2026-11-02
 ### R-035 — Finding F3: HTTP POST margin and contract note methods permitted in read-only allowlist
 - Status: Resolved.
 - Fix: Removed `order_margins`, `basket_order_margins`, and `get_virtual_contract_note` from `_READ_ONLY_ALLOWLIST`, added to `_BLOCKED_METHODS`, with explicit stubs on `ReadOnlyKiteConnect`, `_ReadOnlyKiteWrapper`, and `ZerodhaReadOnlyConnector` raising `PermissionError` before transport.
+
+
+## M3 Final Polish Remediated Audit Findings (Resolved in Working Tree)
+
+### R-036 — Finding R1 & R3: Slippage & Fill Price Positive Validation and Tick Size Rejection
+- Status: Resolved.
+- Fix: `BasisPointsSlippageModel.calculate_slippage` and `PortfolioEngine.apply_fill` reject non-positive prices (`price.amount <= Decimal("0")`) with `ValueError`. In `BasisPointsSlippageModel`, when adverse `ROUND_FLOOR` on `SELL` reduces effective price below `tick_size` (or `<= 0`), raise `ValueError("Effective sell price falls below minimum tick size")` instead of clamping upward.
+
+### R-037 — Finding R2: Exact Zero-Drift Cost Basis Tracking & Conservation Residual
+- Status: Resolved.
+- Fix: `PortfolioEngine` explicitly tracks per-position total cost basis (`_total_cost_basis`) across `apply_fill` and `_replay_ledger`. On partial position reductions, basis removed is computed as `(total_cost_basis * Decimal(quantity)) / Decimal(curr_qty)`, subtracted from tracked basis, and deducted from proceeds to produce `trade_pnl`. On full position exits, the exact remaining tracked basis is removed (`_total_cost_basis.pop(key)`), guaranteeing zero residual drift (`Decimal("0")`) across multi-lot partial and full round trips.
+
+### R-038 — Finding R4: Proposal Gate Long-Exit Stop-Loss & Take-Profit Direction
+- Status: Resolved.
+- Fix: For `SELL` exits of held long positions (`held_qty > 0`), strictly enforce directional bounds: `stop_loss.amount < entry_price` (`INVALID_STOP_LOSS_DIRECTION`) and `take_profit.amount > entry_price` (`INVALID_TAKE_PROFIT_DIRECTION`).
+
+### R-039 — Finding R5: Replay Fixture Identity Mismatch & Naive Timestamp Rejection
+- Status: Resolved.
+- Fix: `StoredReplayFixtureProvider` validates `manifest.fixture_id == self._fixture_id` on load, raising `FixtureIntegrityError("Fixture identity mismatch")` on tampering. Rejects timezone-naive `recorded_at` in manifest with `FixtureIntegrityError("timezone-naive")`.
+
+### R-040 — Finding R6: Synthetic Provider Filtering & Look-Ahead Slicing
+- Status: Resolved.
+- Fix: `SyntheticMarketDataProvider.fetch_historical` and `fetch_latest` strictly validate matching `symbol`, `exchange`, and `interval` (failing closed on mismatches), and slice records strictly on `rec_close <= request.end_time` and `rec_close <= now` to eliminate in-progress bar leakage.
+
+### R-041 — Finding R7: BarContext Non-Overlapping Invariant, Non-Finite JSON Rejection & Iterative Lineage
+- Status: Resolved.
+- Fix: `BarContext.__post_init__` enforces non-overlapping bars (`candle.timestamp < prev_candle.close_time` raises `ValueError`). `save_replay_fixture` rejects non-finite `float` and `Decimal` (`NaN`, `Infinity`). `json.loads` rejects non-standard JSON constants with `parse_constant=_reject_constant`. In `corporate_actions.py`, deduplicated identical corporate actions by `(exchange, symbol, action_type, effective_date, adjustment_factor, new_symbol)` and replaced recursive DFS in `resolve_symbol_lineage` with iterative three-color cycle detection (>1,500 hops).
+
+### R-042 — Finding R8: Proposal Gate Odd-Lot Full Exit Allowance
+- Status: Resolved.
+- Fix: Detected `is_exact_full_exit = (proposal.side == "SELL" and held_qty > 0 and proposal.quantity == held_qty)`. Allowed odd-lot full liquidations without `LOT_SIZE_MISMATCH` and bypassed lot-size truncation in `max_allowed_quantity`.

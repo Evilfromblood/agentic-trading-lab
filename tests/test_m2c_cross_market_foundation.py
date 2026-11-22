@@ -36,7 +36,11 @@ from agentic_trading.market_data.models import (
     Exchange,
     ExchangeCalendar,
 )
-from agentic_trading.market_data.provider import ProviderPayloadError, ProviderResponse
+from agentic_trading.market_data.provider import (
+    ProviderPayloadError,
+    ProviderResponse,
+    SyntheticMarketDataProvider,
+)
 from agentic_trading.market_data.replay_fixtures import (
     _DEFAULT_HMAC_KEY,
     FixtureIntegrityError,
@@ -1386,3 +1390,209 @@ def test_instrument_l4_datetime_rejection() -> None:
 
     with pytest.raises(TypeError, match="as_of_date must be a date, not datetime"):
         registry.list_active_on(Exchange.NSE, dt_val)
+
+
+def test_r5_replay_fixture_id_mismatch_and_naive_dt() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        t0 = datetime(2026, 11, 2, 9, 15, tzinfo=IST)
+        rec = {
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "interval": "5m",
+            "timestamp": t0.isoformat(),
+            "open": "1500.00",
+            "high": "1510.00",
+            "low": "1490.00",
+            "close": "1505.00",
+            "volume": 1000,
+        }
+        resp = ProviderResponse(success=True, source="TEST_SRC", retrieval_timestamp=t0, records=(rec,))
+        save_replay_fixture(tmpdir, "fixture_orig", resp, Exchange.NSE, "INFY", CandleInterval.M5)
+
+        man_path = Path(tmpdir) / "fixture_orig.manifest.json"
+        pay_path = Path(tmpdir) / "fixture_orig.payload.json"
+        man_text = man_path.read_text(encoding="utf-8")
+        pay_bytes = pay_path.read_bytes()
+
+        (Path(tmpdir) / "fixture_renamed.manifest.json").write_text(man_text, encoding="utf-8")
+        (Path(tmpdir) / "fixture_renamed.payload.json").write_bytes(pay_bytes)
+
+        p_renamed = StoredReplayFixtureProvider(tmpdir, "fixture_renamed")
+        with pytest.raises(FixtureIntegrityError, match="Fixture identity mismatch"):
+            p_renamed.fetch_historical(
+                HistoricalDataRequest("INFY", Exchange.NSE, CandleInterval.M5, t0, t0 + timedelta(minutes=5))
+            )
+
+        import json
+        man_dict = json.loads(man_text)
+        man_dict["recorded_at"] = "2026-11-02T09:15:00"
+        (Path(tmpdir) / "fixture_naive.manifest.json").write_text(json.dumps(man_dict), encoding="utf-8")
+        (Path(tmpdir) / "fixture_naive.payload.json").write_bytes(pay_bytes)
+
+        p_naive = StoredReplayFixtureProvider(tmpdir, "fixture_naive")
+        with pytest.raises(FixtureIntegrityError, match="timezone-naive"):
+            p_naive.fetch_historical(
+                HistoricalDataRequest("INFY", Exchange.NSE, CandleInterval.M5, t0, t0 + timedelta(minutes=5))
+            )
+
+
+def test_r6_synthetic_provider_filtering_and_slicing() -> None:
+    t0 = datetime(2026, 11, 2, 9, 15, tzinfo=IST)
+    records = [
+        {"symbol": "RELIANCE", "exchange": "NSE", "interval": "5m", "timestamp": t0.isoformat(), "open": "2500", "high": "2510", "low": "2490", "close": "2505", "volume": 100},
+        {"symbol": "INFY", "exchange": "NSE", "interval": "5m", "timestamp": t0.isoformat(), "open": "1500", "high": "1510", "low": "1490", "close": "1505", "volume": 100},
+        {"symbol": "RELIANCE", "exchange": "BSE", "interval": "5m", "timestamp": t0.isoformat(), "open": "2500", "high": "2510", "low": "2490", "close": "2505", "volume": 100},
+        {"symbol": "RELIANCE", "exchange": "NSE", "interval": "15m", "timestamp": t0.isoformat(), "open": "2500", "high": "2510", "low": "2490", "close": "2505", "volume": 100},
+        {"exchange": "NSE", "interval": "5m", "timestamp": t0.isoformat(), "open": "2500", "high": "2510", "low": "2490", "close": "2505", "volume": 100},
+        {"symbol": "RELIANCE", "interval": "5m", "timestamp": t0.isoformat(), "open": "2500", "high": "2510", "low": "2490", "close": "2505", "volume": 100},
+        {"symbol": "RELIANCE", "exchange": "NSE", "timestamp": t0.isoformat(), "open": "2500", "high": "2510", "low": "2490", "close": "2505", "volume": 100},
+        {"symbol": "RELIANCE", "exchange": "NSE", "interval": "5m", "timestamp": (t0 + timedelta(minutes=5)).isoformat(), "open": "2505", "high": "2515", "low": "2495", "close": "2510", "volume": 100},
+    ]
+    p = SyntheticMarketDataProvider(records=records)
+
+    req = HistoricalDataRequest("RELIANCE", Exchange.NSE, CandleInterval.M5, t0, t0 + timedelta(minutes=5))
+    resp_hist = p.fetch_historical(req)
+    assert resp_hist.success is True
+    assert len(resp_hist.records) == 1
+    assert resp_hist.records[0]["symbol"] == "RELIANCE"
+    assert resp_hist.records[0]["timestamp"] == t0.isoformat()
+
+    resp_latest = p.fetch_latest("RELIANCE", Exchange.NSE, CandleInterval.M5, now=t0 + timedelta(minutes=7))
+    assert resp_latest.success is True
+    assert len(resp_latest.records) == 1
+    assert resp_latest.records[0]["timestamp"] == t0.isoformat()
+
+
+def test_r7_corporate_actions_dedup_and_deep_lineage() -> None:
+    t = datetime(2026, 11, 2, 10, 0, tzinfo=IST)
+    candle = Candle(
+        symbol="INFY",
+        exchange=Exchange.NSE,
+        interval=CandleInterval.D1,
+        open=Decimal("1000.00"),
+        high=Decimal("1010.00"),
+        low=Decimal("990.00"),
+        close=Decimal("1005.00"),
+        volume=10000,
+        timestamp=t,
+        source="TEST",
+        retrieval_timestamp=t + timedelta(hours=6),
+    )
+    act1 = CorporateAction(
+        exchange=Exchange.NSE,
+        symbol="INFY",
+        action_type=CorporateActionType.SPLIT,
+        effective_date=date(2026, 11, 5),
+        announcement_date=date(2026, 10, 20),
+        adjustment_factor=Decimal("0.5"),
+    )
+    act2_duplicate_diff_announcement = CorporateAction(
+        exchange=Exchange.NSE,
+        symbol="INFY",
+        action_type=CorporateActionType.SPLIT,
+        effective_date=date(2026, 11, 5),
+        announcement_date=date(2026, 10, 25),
+        adjustment_factor=Decimal("0.5"),
+    )
+    adjusted = adjust_candles_for_corporate_actions([candle], [act1, act2_duplicate_diff_announcement])
+    assert len(adjusted) == 1
+    assert adjusted[0].open == Decimal("500.00")
+    assert adjusted[0].volume == 20000
+
+    chain_actions = [
+        CorporateAction(
+            exchange=Exchange.NSE,
+            symbol=f"SYM_{i}",
+            action_type=CorporateActionType.SYMBOL_CHANGE,
+            effective_date=date(2026, 1, 1),
+            new_symbol=f"SYM_{i+1}",
+        )
+        for i in range(1600)
+    ]
+    resolved = resolve_symbol_lineage(Exchange.NSE, "SYM_0", date(2026, 6, 1), chain_actions)
+    assert resolved == "SYM_1600"
+
+
+def test_r7_replay_fixture_rejects_non_finite_values_and_constants() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        t0 = datetime(2026, 11, 2, 9, 15, tzinfo=IST)
+        rec_nan_float = {
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "interval": "5m",
+            "timestamp": t0.isoformat(),
+            "open": float("nan"),
+            "high": "1510.00",
+            "low": "1490.00",
+            "close": "1505.00",
+            "volume": 1000,
+        }
+        resp_nan_float = ProviderResponse(success=True, source="TEST", retrieval_timestamp=t0, records=(rec_nan_float,))
+        with pytest.raises(FixtureIntegrityError, match="Non-finite float value"):
+            save_replay_fixture(tmpdir, "fix_nan_fl", resp_nan_float, Exchange.NSE, "INFY", CandleInterval.M5)
+
+        rec_inf_dec = {
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "interval": "5m",
+            "timestamp": t0.isoformat(),
+            "open": Decimal("Infinity"),
+            "high": Decimal("1510.00"),
+            "low": Decimal("1490.00"),
+            "close": Decimal("1505.00"),
+            "volume": 1000,
+        }
+        resp_inf_dec = ProviderResponse(success=True, source="TEST", retrieval_timestamp=t0, records=(rec_inf_dec,))
+        with pytest.raises(FixtureIntegrityError, match="Non-finite Decimal value"):
+            save_replay_fixture(tmpdir, "fix_inf_dec", resp_inf_dec, Exchange.NSE, "INFY", CandleInterval.M5)
+
+        valid_rec = {
+            "symbol": "INFY",
+            "exchange": "NSE",
+            "interval": "5m",
+            "timestamp": t0.isoformat(),
+            "open": "1500.00",
+            "high": "1510.00",
+            "low": "1490.00",
+            "close": "1505.00",
+            "volume": 1000,
+        }
+        resp_valid = ProviderResponse(success=True, source="TEST", retrieval_timestamp=t0, records=(valid_rec,))
+        save_replay_fixture(tmpdir, "fix_valid", resp_valid, Exchange.NSE, "INFY", CandleInterval.M5)
+
+        man_nan_path = Path(tmpdir) / "fix_man_nan.manifest.json"
+        man_nan_path.write_text('{"fixture_id": NaN}', encoding="utf-8")
+        pay_valid_path = Path(tmpdir) / "fix_man_nan.payload.json"
+        pay_valid_path.write_text("[]", encoding="utf-8")
+        p_man_nan = StoredReplayFixtureProvider(tmpdir, "fix_man_nan")
+        with pytest.raises(FixtureIntegrityError, match="Non-finite JSON constant not allowed"):
+            p_man_nan.fetch_historical(
+                HistoricalDataRequest("INFY", Exchange.NSE, CandleInterval.M5, t0, t0 + timedelta(minutes=5))
+            )
+
+        bad_payload = b'[{"symbol":"INFY","open":NaN}]'
+        bad_digest = _compute_fixture_hmac(
+            key_bytes=_DEFAULT_HMAC_KEY,
+            fixture_id="fix_valid",
+            source="TEST",
+            exchange=Exchange.NSE.value,
+            symbol="INFY",
+            interval=CandleInterval.M5.value,
+            recorded_at=t0.isoformat(),
+            record_count=1,
+            payload_bytes=bad_payload,
+        )
+        man_path = Path(tmpdir) / "fix_valid.manifest.json"
+        import json
+        man_data = json.loads(man_path.read_text(encoding="utf-8"))
+        man_data["payload_sha256"] = bad_digest
+        man_path.write_text(json.dumps(man_data), encoding="utf-8")
+
+        pay_path = Path(tmpdir) / "fix_valid.payload.json"
+        pay_path.write_bytes(bad_payload)
+        provider = StoredReplayFixtureProvider(tmpdir, "fix_valid")
+        with pytest.raises(FixtureIntegrityError, match="Non-finite JSON constant not allowed"):
+            provider.fetch_historical(
+                HistoricalDataRequest("INFY", Exchange.NSE, CandleInterval.M5, t0, t0 + timedelta(minutes=5))
+            )
+

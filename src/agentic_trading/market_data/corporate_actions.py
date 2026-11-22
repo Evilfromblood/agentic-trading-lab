@@ -132,23 +132,27 @@ def resolve_symbol_lineage(
             component_nodes.add(curr)
             frontier.extend(undirected.get(curr, set()) - component_nodes)
 
-    visited_dfs: dict[str, int] = {}
+    color: dict[str, int] = {}
 
-    def detect_cycle(node: str) -> bool:
-        visited_dfs[node] = 1
-        for nbr in adj.get(node, ()):
-            if nbr in component_nodes:
-                if visited_dfs.get(nbr, 0) == 1:
-                    return True
-                if visited_dfs.get(nbr, 0) == 0 and detect_cycle(nbr):
-                    return True
-        visited_dfs[node] = 2
-        return False
-
-    for node in component_nodes:
-        if node in adj and visited_dfs.get(node, 0) == 0:
-            if detect_cycle(node):
-                raise ValueError(f"Cyclic symbol change detected involving symbol '{node}'")
+    for start in component_nodes:
+        if start not in adj or color.get(start, 0) != 0:
+            continue
+        stack = [(start, iter(adj.get(start, ())))]
+        color[start] = 1
+        while stack:
+            node, children = stack[-1]
+            try:
+                child = next(children)
+                if child not in component_nodes:
+                    continue
+                if color.get(child, 0) == 1:
+                    raise ValueError(f"Cyclic symbol change detected involving symbol '{child}'")
+                if color.get(child, 0) == 0:
+                    color[child] = 1
+                    stack.append((child, iter(adj.get(child, ()))))
+            except StopIteration:
+                color[node] = 2
+                stack.pop()
 
     current_symbol = clean_symbol
     traversal_path: set[str] = {current_symbol}
@@ -218,7 +222,17 @@ def adjust_candles_for_corporate_actions(
             and act.effective_date > candle_date
             and (as_of_date is None or (act.announcement_date or act.effective_date) <= as_of_date)
         ]
-        matching_actions = list(dict.fromkeys(matching_actions))
+        seen_keys: dict[tuple, None] = {}
+        deduped: list = []
+        for _act in matching_actions:
+            _key = (
+                _act.exchange, _act.symbol, _act.action_type,
+                _act.effective_date, _act.adjustment_factor, _act.new_symbol,
+            )
+            if _key not in seen_keys:
+                seen_keys[_key] = None
+                deduped.append(_act)
+        matching_actions = deduped
 
         if not matching_actions:
             if tick_size is not None:

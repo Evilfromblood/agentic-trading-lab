@@ -103,12 +103,15 @@ def evaluate_trade_proposal(
         reasons.append("INVALID_ENTRY_PRICE")
 
     lot_size = proposal.instrument.lot_size if proposal.instrument.lot_size > 0 else 1
-    if proposal.quantity <= 0 or proposal.quantity % lot_size != 0:
-        reasons.append("LOT_SIZE_MISMATCH")
-
     key = (proposal.instrument.exchange, proposal.instrument.symbol)
     curr_pos = portfolio.positions.get(key)
     held_qty = curr_pos.quantity if (curr_pos is not None and curr_pos.quantity > 0) else 0
+    is_exact_full_exit = (
+        proposal.side == "SELL" and held_qty > 0 and proposal.quantity == held_qty
+    )
+    if proposal.quantity <= 0 or (not is_exact_full_exit and proposal.quantity % lot_size != 0):
+        reasons.append("LOT_SIZE_MISMATCH")
+
 
     if proposal.side == "SELL":
         if held_qty <= 0:
@@ -130,7 +133,9 @@ def evaluate_trade_proposal(
         elif entry_price.amount > 0:
             if proposal.side == "BUY" and proposal.stop_loss.amount >= entry_price.amount:
                 reasons.append("INVALID_STOP_LOSS_DIRECTION")
-            elif proposal.side == "SELL" and proposal.stop_loss.amount <= entry_price.amount:
+            elif proposal.side == "SELL" and held_qty > 0 and proposal.stop_loss.amount >= entry_price.amount:
+                reasons.append("INVALID_STOP_LOSS_DIRECTION")
+            elif proposal.side == "SELL" and held_qty <= 0 and proposal.stop_loss.amount <= entry_price.amount:
                 reasons.append("INVALID_STOP_LOSS_DIRECTION")
 
     if proposal.take_profit is not None:
@@ -139,7 +144,9 @@ def evaluate_trade_proposal(
         elif entry_price.amount > 0:
             if proposal.side == "BUY" and proposal.take_profit.amount <= entry_price.amount:
                 reasons.append("INVALID_TAKE_PROFIT_DIRECTION")
-            elif proposal.side == "SELL" and proposal.take_profit.amount >= entry_price.amount:
+            elif proposal.side == "SELL" and held_qty > 0 and proposal.take_profit.amount <= entry_price.amount:
+                reasons.append("INVALID_TAKE_PROFIT_DIRECTION")
+            elif proposal.side == "SELL" and held_qty <= 0 and proposal.take_profit.amount >= entry_price.amount:
                 reasons.append("INVALID_TAKE_PROFIT_DIRECTION")
 
     if proposal.limit_price is not None:
@@ -235,10 +242,14 @@ def evaluate_trade_proposal(
             else:
                 max_allowed_qty = 0
         else:
-            allowed_sell = (held_qty // lot_size) * lot_size
+            if is_exact_full_exit:
+                allowed_sell = held_qty
+            else:
+                allowed_sell = (held_qty // lot_size) * lot_size
             max_allowed_qty = min(proposal.quantity, allowed_sell)
 
-    max_allowed_qty = max(0, (max_allowed_qty // lot_size) * lot_size)
+    if not is_exact_full_exit:
+        max_allowed_qty = max(0, (max_allowed_qty // lot_size) * lot_size)
 
     if reasons:
         unique_reasons = tuple(dict.fromkeys(reasons))

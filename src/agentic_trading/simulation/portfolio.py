@@ -107,6 +107,7 @@ class PortfolioEngine:
         self.ledger = ledger or AccountingLedger()
         self._positions: dict[tuple[Exchange, str], Position] = {}
         self._realized_pnl_by_symbol: dict[tuple[Exchange, str], Decimal] = {}
+        self._total_cost_basis: dict[tuple[Exchange, str], Decimal] = {}
 
         if ledger is not None and ledger.entries:
             self._replay_ledger(ledger.entries)
@@ -154,6 +155,7 @@ class PortfolioEngine:
                     prior_cost = curr_avg * Decimal(curr_qty)
                     add_cost = price * Decimal(qty)
                     new_avg = (prior_cost + add_cost) / Decimal(new_q) if new_q > 0 else Decimal("0")
+                    self._total_cost_basis[key] = prior_cost + add_cost
                     self._positions[key] = Position(
                         entry.exchange,
                         entry.symbol,
@@ -310,6 +312,8 @@ class PortfolioEngine:
             raise CurrencyMismatchError(
                 f"Fill price currency {execution_price.currency} does not match portfolio {self.currency}"
             )
+        if execution_price.amount <= Decimal("0"):
+            raise ValueError(f"Fill price must be strictly positive, got {execution_price.amount}")
 
         if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity <= 0:
             raise ValueError(f"quantity must be a positive integer, got {quantity}")
@@ -391,7 +395,9 @@ class PortfolioEngine:
                 new_q = curr_qty + quantity
                 prior_cost = curr_avg * Decimal(curr_qty)
                 add_cost = fill_cost
-                new_avg = (prior_cost + add_cost) / Decimal(new_q)
+                new_total_basis = prior_cost + add_cost
+                new_avg = new_total_basis / Decimal(new_q)
+                self._total_cost_basis[key] = new_total_basis
                 self._positions[key] = Position(
                     exchange=exchange,
                     symbol=clean_symbol,
@@ -446,12 +452,19 @@ class PortfolioEngine:
                     realized_pnl=Money(self._realized_pnl_by_symbol[key], self.currency),
                 )
             else:
-                trade_pnl = (slipped_price.amount - curr_avg) * Decimal(quantity)
+                curr_basis = self._total_cost_basis.get(key, curr_avg * Decimal(curr_qty))
+                if quantity >= curr_qty:
+                    basis_removed = curr_basis
+                else:
+                    basis_removed = (curr_basis * Decimal(quantity)) / Decimal(curr_qty)
+                trade_pnl = slipped_price.amount * Decimal(quantity) - basis_removed
                 self._realized_pnl_by_symbol[key] = self._realized_pnl_by_symbol.get(key, Decimal("0")) + trade_pnl
                 new_q = curr_qty - quantity
                 if new_q == 0:
+                    self._total_cost_basis.pop(key, None)
                     self._positions.pop(key, None)
                 else:
+                    self._total_cost_basis[key] = curr_basis - basis_removed
                     self._positions[key] = Position(
                         exchange=exchange,
                         symbol=clean_symbol,

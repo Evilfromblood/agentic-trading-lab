@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -29,6 +30,10 @@ _DEFAULT_HMAC_KEY: bytes = b"agentic-trading-lab-replay-key-v1"
 
 class FixtureIntegrityError(ValueError):
     """Raised when a replay fixture violates integrity or security invariants."""
+
+
+def _reject_constant(val: str) -> Any:
+    raise FixtureIntegrityError(f"Non-finite JSON constant not allowed: {val}")
 
 
 def _json_default(obj: Any) -> Any:
@@ -176,6 +181,16 @@ def save_replay_fixture(
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
 
     key_bytes = _to_key_bytes(hmac_key)
+    for _rec in response.records:
+        for _v in (_rec.values() if isinstance(_rec, Mapping) else _rec):
+            if isinstance(_v, float) and not math.isfinite(_v):
+                raise FixtureIntegrityError(
+                    f"Non-finite float value in fixture record: {_v}"
+                )
+            if isinstance(_v, Decimal) and not _v.is_finite():
+                raise FixtureIntegrityError(
+                    f"Non-finite Decimal value in fixture record: {_v}"
+                )
     payload_json = json.dumps(
         list(response.records),
         sort_keys=True,
@@ -252,7 +267,12 @@ class StoredReplayFixtureProvider(MarketDataProvider):
             raise FixtureIntegrityError(f"Missing fixture payload file: {self._payload_path}")
 
         try:
-            manifest_dict = json.loads(self._manifest_path.read_text(encoding="utf-8"))
+            manifest_dict = json.loads(
+                self._manifest_path.read_text(encoding="utf-8"),
+                parse_constant=_reject_constant,
+            )
+        except FixtureIntegrityError:
+            raise
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise FixtureIntegrityError(f"Corrupt manifest JSON in {self._manifest_path}: {exc}") from exc
 
@@ -272,8 +292,19 @@ class StoredReplayFixtureProvider(MarketDataProvider):
                     f"Missing required manifest field '{field_name}' in {self._manifest_path}"
                 )
 
+        raw_recorded_at = manifest_dict["recorded_at"]
         try:
-            recorded_at = datetime.fromisoformat(manifest_dict["recorded_at"])
+            recorded_at = datetime.fromisoformat(str(raw_recorded_at))
+        except (ValueError, TypeError) as exc:
+            raise FixtureIntegrityError(
+                f"Invalid recorded_at in manifest {self._manifest_path}: {exc}"
+            ) from exc
+        if recorded_at.tzinfo is None or recorded_at.tzinfo.utcoffset(recorded_at) is None:
+            raise FixtureIntegrityError(
+                f"Fixture '{self._fixture_id}' manifest recorded_at is timezone-naive"
+            )
+        try:
+            recorded_at = recorded_at
             manifest = FixtureManifest(
                 fixture_id=manifest_dict["fixture_id"],
                 source=manifest_dict["source"],
@@ -286,6 +317,12 @@ class StoredReplayFixtureProvider(MarketDataProvider):
             )
         except (ValueError, TypeError) as exc:
             raise FixtureIntegrityError(f"Invalid field values in manifest {self._manifest_path}: {exc}") from exc
+
+        if manifest.fixture_id != self._fixture_id:
+            raise FixtureIntegrityError(
+                f"Fixture identity mismatch: manifest fixture_id '{manifest.fixture_id}' "
+                f"does not match expected '{self._fixture_id}'"
+            )
 
         payload_bytes = self._payload_path.read_bytes()
         computed_digest = _compute_fixture_hmac(
@@ -307,7 +344,12 @@ class StoredReplayFixtureProvider(MarketDataProvider):
             )
 
         try:
-            records_raw = json.loads(payload_bytes.decode("utf-8"))
+            records_raw = json.loads(
+                payload_bytes.decode("utf-8"),
+                parse_constant=_reject_constant,
+            )
+        except FixtureIntegrityError:
+            raise
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise ProviderPayloadError(f"Corrupt payload JSON in {self._payload_path}: {exc}") from exc
 

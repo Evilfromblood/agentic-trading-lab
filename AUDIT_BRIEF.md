@@ -1,9 +1,9 @@
-# Milestone 2b — Batch 7 / 7b Remediation Audit Brief
+# Milestone 3 & M2b Remediation Audit Brief
 
-**Status:** Remediation Complete — M2b awaits independent review; M2c has not begun.  
+**Status:** Complete — M2a, M2b, M2c, and M3 (including Hardening Batches A & B and Final Polish Pass R1–R8) verified; ready for Time Machine (Milestone 4).  
 **Baseline Commit:** `1b7e5829474239495163da1d2d3349eb35ca9744`  
 **Active Branch:** `feature/reliable-foundation`  
-**Audit Bundle:** `m2b-remediated-batch7b-bundle.zip`
+**Audit Bundle:** `full-project-m3-final-bundle.zip`
 
 ---
 
@@ -79,3 +79,25 @@ All 338 tests pass across the test suite on both genuine Python 3.11.9 (`.venv31
 
 1. Have Claude perform an independent adversarial review of `m2b-remediated-batch7b-bundle.zip`.
 2. Do not begin M2c until that review closes all critical and high-severity findings.
+
+---
+
+## 5. Milestone 3 Final Polish Pass (R1–R8) Summary
+
+Milestone 3 establishes the append-only ledger, multi-currency portfolio solvency, statutory cost models, point-in-time universe guards, strategy contracts, deterministic risk gate, and cross-market foundation. The Final Polish Pass resolves all 8 adversarial audit residuals (R1–R8):
+
+| Item | Area | Description & Resolution | Verification Test |
+|---|---|---|---|
+| **R1 & R3** | Costs & Pricing | `calculate_slippage` and `apply_fill` reject `price <= 0` with `ValueError`. When adverse `ROUND_FLOOR` on sell reduces effective price below `tick_size` (or `<= 0`), raises `ValueError` rather than clamping upward. | `tests/test_m3_simulation_and_risk.py::test_r1_slippage_and_fill_price_positive_rejection`<br>`tests/test_m3_simulation_and_risk.py::test_r3_slippage_sell_below_tick_size_rejection` |
+| **R2** | Portfolio Accounting | Exact per-position cost basis tracking (`_total_cost_basis`) eliminates fractional cent drift on partial and full liquidations, guaranteeing exact zero residual drift (`Decimal("0")`). | `tests/test_m3_simulation_and_risk.py::test_r2_exact_zero_drift_conservation_residual` |
+| **R4 & R8** | Proposal Risk Gate | Directional checks on long exits: `stop_loss < entry_price` and `take_profit > entry_price`. Detects exact full exits (`proposal.quantity == held_qty`), permitting odd-lot full liquidations without `LOT_SIZE_MISMATCH` or truncation. | `tests/test_m3_simulation_and_risk.py::test_r4_proposal_gate_long_exit_stop_loss_take_profit_direction`<br>`tests/test_m3_simulation_and_risk.py::test_r8_proposal_gate_odd_lot_full_exit_allowed` |
+| **R5** | Replay Fixtures | Validates `manifest.fixture_id == self._fixture_id` on load, raising `FixtureIntegrityError("Fixture identity mismatch")`. Rejects timezone-naive `recorded_at` in manifest. | `tests/test_m2c_cross_market_foundation.py::test_r5_replay_fixture_id_mismatch_and_naive_dt` |
+| **R6** | Synthetic Provider | Enforces strict matching on `symbol`, `exchange`, and `interval` (failing closed on mismatch), and slices on `rec_close <= end_time` and `rec_close <= now` to eliminate in-progress bar leakage. | `tests/test_m2c_cross_market_foundation.py::test_r6_synthetic_provider_filtering_and_slicing` |
+| **R7** | Strategy & Actions | `BarContext` enforces non-overlapping bars (`timestamp < prev_close`). Replay fixtures reject non-finite float/Decimal and parse constants. Corporate actions deduplicate identical actions and resolve lineage iteratively (>1500 hops). | `tests/test_m3_simulation_and_risk.py::test_r7_bar_context_overlapping_bars_rejection`<br>`tests/test_m2c_cross_market_foundation.py::test_r7_corporate_actions_dedup_and_deep_lineage`<br>`tests/test_m2c_cross_market_foundation.py::test_r7_replay_fixture_rejects_non_finite_values_and_constants` |
+
+### Suite Verification:
+- **Pytest:** 410 passed in 4.34s on Python 3.11 (`.venv311`), 410 passed in 1.88s on Python 3.14 (`.venv`).
+- **Coverage:** **87.40%** (exceeds `--cov-fail-under=85`).
+- **Ruff & Compileall:** All clean, exit code 0.
+- **Secrets:** 0 leaks detected against `.secrets.baseline`.
+- **Inline `#` Comments:** 0 in git diff.

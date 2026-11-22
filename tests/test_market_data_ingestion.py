@@ -16,8 +16,8 @@ Verifies:
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Mapping
-from datetime import datetime, timedelta
+from collections.abc import Mapping, Sequence
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -48,6 +48,41 @@ from agentic_trading.market_data import (
     ValidationResult,
 )
 from agentic_trading.risk_engine import OrderProposal, Side, evaluate_order
+
+
+class _UnfilteredRawProvider(MarketDataProvider):
+    """Raw provider that bypasses SyntheticMarketDataProvider filtering for pipeline failure tests."""
+
+    def __init__(self, records: Sequence[Mapping[str, Any]], source_name: str = "SYNTHETIC_NSE") -> None:
+        self._records = tuple(records)
+        self._source_name = source_name
+
+    @property
+    def source_name(self) -> str:
+        return self._source_name
+
+    def fetch_historical(self, request: HistoricalDataRequest) -> ProviderResponse:
+        return ProviderResponse(
+            success=True,
+            source=self._source_name,
+            retrieval_timestamp=request.end_time,
+            records=self._records,
+        )
+
+    def fetch_latest(
+        self,
+        symbol: str,
+        exchange: Exchange,
+        interval: CandleInterval,
+        now: datetime | None = None,
+    ) -> ProviderResponse:
+        t = now or datetime.now(timezone.utc)
+        return ProviderResponse(
+            success=True,
+            source=self._source_name,
+            retrieval_timestamp=t,
+            records=self._records,
+        )
 
 
 def _build_raw_record(
@@ -272,7 +307,7 @@ def test_future_candle_rejected_by_pipeline() -> None:
     """Verify pipeline rejects future-dated candles via the M2a quality gate."""
     t0 = datetime(2026, 11, 2, 9, 15, tzinfo=IST)
     raw = _build_raw_record(timestamp=t0.isoformat())
-    provider = SyntheticMarketDataProvider(records=[raw])
+    provider = _UnfilteredRawProvider(records=[raw])
     pipeline = MarketDataIngestionPipeline(provider)
 
     # Reference time is prior to candle open (09:10:00 IST)
@@ -759,7 +794,7 @@ def test_ingest_latest_fails_closed_on_ambiguous_or_duplicate_max_timestamp() ->
 
     # Records with missing timestamp among multiple records
     rec_no_ts = {"open": "2500", "high": "2510", "low": "2490", "close": "2505", "volume": 100}
-    p_unparseable = SyntheticMarketDataProvider(records=[rec_a, rec_no_ts])
+    p_unparseable = _UnfilteredRawProvider(records=[rec_a, rec_no_ts])
     pipe_unparseable = MarketDataIngestionPipeline(p_unparseable)
 
     res_unparseable = pipe_unparseable.ingest_latest(
@@ -800,7 +835,7 @@ def test_h1_future_candle_rejected_as_future() -> None:
     """Verify that a candle timestamped in the future relative to now is rejected as FUTURE_CANDLE."""
     t_future = datetime(2026, 11, 2, 10, 0, tzinfo=IST)
     raw = _build_raw_record(timestamp=t_future.isoformat())
-    provider = SyntheticMarketDataProvider(records=[raw])
+    provider = _UnfilteredRawProvider(records=[raw])
     pipeline = MarketDataIngestionPipeline(provider)
 
     eval_now = datetime(2026, 11, 2, 9, 30, tzinfo=IST)
@@ -1159,7 +1194,7 @@ def test_m1_pipeline_default_adapter_enforces_require_payload_identity() -> None
         "close": "2505.00",
         "volume": 1000,
     }
-    provider = SyntheticMarketDataProvider(records=[raw_anonymous])
+    provider = _UnfilteredRawProvider(records=[raw_anonymous])
     # Pipeline without explicit adapter uses default StandardDictAdapter with require_payload_identity=True
     pipeline = MarketDataIngestionPipeline(provider)
 
@@ -2002,7 +2037,7 @@ def test_h1_freshness_policy_unsupported_intervals_fail_closed() -> None:
     raw = _build_raw_record(interval="1w", timestamp=t0.isoformat())
     provider = SyntheticMarketDataProvider(records=[raw])
     pipeline = MarketDataIngestionPipeline(provider)
-    eval_now = t0 + timedelta(days=2)
+    eval_now = t0 + timedelta(days=8)
 
     # Fails closed on W1 without custom configuration
     res = pipeline.ingest_latest("RELIANCE", Exchange.NSE, CandleInterval.W1, now=eval_now)

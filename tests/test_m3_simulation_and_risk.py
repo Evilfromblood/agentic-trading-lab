@@ -1415,3 +1415,222 @@ def test_rsi_m8_flat_prices_neutral_50() -> None:
     assert res is not None
     assert res == Decimal("50")
 
+
+def test_r1_slippage_and_fill_price_positive_rejection() -> None:
+    model = BasisPointsSlippageModel(Decimal("5"))
+    with pytest.raises(ValueError, match="Price must be strictly positive"):
+        model.calculate_slippage(Money(Decimal("0"), Currency.INR), "BUY", Decimal("0.05"))
+    with pytest.raises(ValueError, match="Price must be strictly positive"):
+        model.calculate_slippage(Money(Decimal("-10.00"), Currency.INR), "SELL", Decimal("0.05"))
+
+    engine = PortfolioEngine(Currency.INR)
+    t = datetime(2026, 11, 2, 10, 0, tzinfo=UTC)
+    engine.deposit(Money(Decimal("10000"), Currency.INR), t)
+    with pytest.raises(ValueError, match="Fill price must be strictly positive"):
+        engine.apply_fill(t, Exchange.NSE, "INFY", "BUY", 10, Money(Decimal("0"), Currency.INR))
+    with pytest.raises(ValueError, match="Fill price must be strictly positive"):
+        engine.apply_fill(t, Exchange.NSE, "INFY", "BUY", 10, Money(Decimal("-50"), Currency.INR))
+
+
+def test_r2_exact_zero_drift_conservation_residual() -> None:
+    engine = PortfolioEngine(Currency.INR)
+    t0 = datetime(2026, 11, 2, 9, 15, tzinfo=UTC)
+    engine.deposit(Money(Decimal("1000000.00"), Currency.INR), t0)
+
+    t1 = t0 + timedelta(minutes=5)
+    engine.apply_fill(t1, Exchange.NSE, "INFY", "BUY", 100, Money(Decimal("1000.00"), Currency.INR))
+    t2 = t1 + timedelta(minutes=5)
+    engine.apply_fill(t2, Exchange.NSE, "INFY", "BUY", 50, Money(Decimal("1050.00"), Currency.INR))
+    t3 = t2 + timedelta(minutes=5)
+    engine.apply_fill(t3, Exchange.NSE, "INFY", "BUY", 75, Money(Decimal("980.00"), Currency.INR))
+
+    t4 = t3 + timedelta(minutes=5)
+    engine.apply_fill(t4, Exchange.NSE, "INFY", "SELL", 40, Money(Decimal("1020.00"), Currency.INR))
+    t5 = t4 + timedelta(minutes=5)
+    engine.apply_fill(t5, Exchange.NSE, "INFY", "SELL", 80, Money(Decimal("1040.00"), Currency.INR))
+    t6 = t5 + timedelta(minutes=5)
+    engine.apply_fill(t6, Exchange.NSE, "INFY", "SELL", 105, Money(Decimal("1010.00"), Currency.INR))
+
+    assert (Exchange.NSE, "INFY") not in engine._total_cost_basis
+    assert (Exchange.NSE, "INFY") not in engine._positions
+
+    t7 = t6 + timedelta(minutes=5)
+    engine.apply_fill(t7, Exchange.NSE, "TCS", "BUY", 200, Money(Decimal("500.00"), Currency.INR))
+    t8 = t7 + timedelta(minutes=5)
+    engine.apply_fill(t8, Exchange.NSE, "TCS", "SELL", 75, Money(Decimal("520.00"), Currency.INR))
+
+    t9 = t8 + timedelta(minutes=5)
+    engine.apply_dividend(t9, Exchange.NSE, "TCS", Money(Decimal("250.00"), Currency.INR))
+    t10 = t9 + timedelta(minutes=5)
+    engine.withdraw(Money(Decimal("50000.00"), Currency.INR), t10)
+
+    cash = engine.ledger.get_cash_balance(Currency.INR).amount
+    deposits = engine.ledger.get_total_deposits(Currency.INR).amount
+    withdrawals = engine.ledger.get_total_withdrawals(Currency.INR).amount
+    realized_pnl = sum(engine._realized_pnl_by_symbol.values(), Decimal("0"))
+    dividends = engine.ledger.get_total_dividends(Currency.INR).amount
+    fees = engine.ledger.get_total_fees(Currency.INR).amount
+    open_basis = sum(engine._total_cost_basis.values(), Decimal("0"))
+
+    residual = (deposits - withdrawals + realized_pnl + dividends - fees) - (cash + open_basis)
+    assert residual == Decimal("0")
+
+
+def test_r3_slippage_sell_below_tick_size_rejection() -> None:
+    model = BasisPointsSlippageModel(Decimal("5000"))
+    price = Money(Decimal("0.02"), Currency.INR)
+    with pytest.raises(ValueError, match="falls below minimum tick size"):
+        model.calculate_slippage(price, "SELL", Decimal("0.05"))
+
+
+def test_r4_proposal_gate_long_exit_stop_loss_take_profit_direction() -> None:
+    t = datetime(2026, 11, 2, 10, 0, tzinfo=UTC)
+    inst = Instrument(symbol="INFY", exchange=Exchange.NSE, currency=Currency.INR, lot_size=1)
+    pos = Position(
+        exchange=Exchange.NSE,
+        symbol="INFY",
+        currency=Currency.INR,
+        quantity=100,
+        average_cost=Money(Decimal("1500.00"), Currency.INR),
+        realized_pnl=Money(Decimal("0"), Currency.INR),
+    )
+    portfolio = PortfolioSnapshot(
+        timestamp=t,
+        currency=Currency.INR,
+        cash=Money(Decimal("100000.00"), Currency.INR),
+        holdings_value=Money(Decimal("150000.00"), Currency.INR),
+        total_equity=Money(Decimal("250000.00"), Currency.INR),
+        realized_pnl=Money(Decimal("0"), Currency.INR),
+        unrealized_pnl=Money(Decimal("0"), Currency.INR),
+        positions={(Exchange.NSE, "INFY"): pos},
+    )
+    policy = PortfolioRiskPolicy()
+    entry = Money(Decimal("1500.00"), Currency.INR)
+    pnl = Money(Decimal("0"), Currency.INR)
+    peak = Money(Decimal("250000.00"), Currency.INR)
+
+    prop_valid = TradeProposal(
+        proposal_id="p1",
+        strategy_id="s1",
+        instrument=inst,
+        timestamp=t,
+        side="SELL",
+        quantity=50,
+        stop_loss=Money(Decimal("1400.00"), Currency.INR),
+        take_profit=Money(Decimal("1600.00"), Currency.INR),
+    )
+    dec_valid = evaluate_trade_proposal(prop_valid, portfolio, entry, policy, pnl, peak)
+    assert dec_valid.approved is True
+
+    prop_bad_sl = TradeProposal(
+        proposal_id="p2",
+        strategy_id="s1",
+        instrument=inst,
+        timestamp=t,
+        side="SELL",
+        quantity=50,
+        stop_loss=Money(Decimal("1550.00"), Currency.INR),
+    )
+    dec_bad_sl = evaluate_trade_proposal(prop_bad_sl, portfolio, entry, policy, pnl, peak)
+    assert dec_bad_sl.approved is False
+    assert "INVALID_STOP_LOSS_DIRECTION" in dec_bad_sl.reasons
+
+    prop_bad_tp = TradeProposal(
+        proposal_id="p3",
+        strategy_id="s1",
+        instrument=inst,
+        timestamp=t,
+        side="SELL",
+        quantity=50,
+        take_profit=Money(Decimal("1450.00"), Currency.INR),
+    )
+    dec_bad_tp = evaluate_trade_proposal(prop_bad_tp, portfolio, entry, policy, pnl, peak)
+    assert dec_bad_tp.approved is False
+    assert "INVALID_TAKE_PROFIT_DIRECTION" in dec_bad_tp.reasons
+
+
+def test_r7_bar_context_overlapping_bars_rejection() -> None:
+    inst = Instrument(symbol="INFY", exchange=Exchange.NSE, currency=Currency.INR)
+    t0 = datetime(2026, 11, 2, 9, 15, tzinfo=UTC)
+    c1 = Candle(
+        symbol="INFY",
+        exchange=Exchange.NSE,
+        interval=CandleInterval.M5,
+        open=Decimal("100"),
+        high=Decimal("105"),
+        low=Decimal("95"),
+        close=Decimal("102"),
+        volume=100,
+        timestamp=t0,
+        source="test",
+        retrieval_timestamp=t0 + timedelta(minutes=5),
+    )
+    c2_overlap = Candle(
+        symbol="INFY",
+        exchange=Exchange.NSE,
+        interval=CandleInterval.M5,
+        open=Decimal("102"),
+        high=Decimal("106"),
+        low=Decimal("100"),
+        close=Decimal("104"),
+        volume=100,
+        timestamp=t0 + timedelta(minutes=2),
+        source="test",
+        retrieval_timestamp=t0 + timedelta(minutes=7),
+    )
+    dec_time = t0 + timedelta(minutes=30)
+    with pytest.raises(ValueError, match="Overlapping bars"):
+        BarContext(inst, dec_time, (c1, c2_overlap))
+
+
+def test_r8_proposal_gate_odd_lot_full_exit_allowed() -> None:
+    t = datetime(2026, 11, 2, 10, 0, tzinfo=UTC)
+    inst = Instrument(symbol="INFY", exchange=Exchange.NSE, currency=Currency.INR, lot_size=100)
+    pos = Position(
+        exchange=Exchange.NSE,
+        symbol="INFY",
+        currency=Currency.INR,
+        quantity=37,
+        average_cost=Money(Decimal("1500.00"), Currency.INR),
+        realized_pnl=Money(Decimal("0"), Currency.INR),
+    )
+    portfolio = PortfolioSnapshot(
+        timestamp=t,
+        currency=Currency.INR,
+        cash=Money(Decimal("100000.00"), Currency.INR),
+        holdings_value=Money(Decimal("55500.00"), Currency.INR),
+        total_equity=Money(Decimal("155500.00"), Currency.INR),
+        realized_pnl=Money(Decimal("0"), Currency.INR),
+        unrealized_pnl=Money(Decimal("0"), Currency.INR),
+        positions={(Exchange.NSE, "INFY"): pos},
+    )
+    policy = PortfolioRiskPolicy(require_stop_loss=False)
+    entry = Money(Decimal("1500.00"), Currency.INR)
+    pnl = Money(Decimal("0"), Currency.INR)
+    peak = Money(Decimal("155500.00"), Currency.INR)
+
+    prop_full = TradeProposal(
+        proposal_id="p_full",
+        strategy_id="s1",
+        instrument=inst,
+        timestamp=t,
+        side="SELL",
+        quantity=37,
+    )
+    dec_full = evaluate_trade_proposal(prop_full, portfolio, entry, policy, pnl, peak)
+    assert dec_full.approved is True
+    assert dec_full.max_allowed_quantity == 37
+
+    prop_partial = TradeProposal(
+        proposal_id="p_part",
+        strategy_id="s1",
+        instrument=inst,
+        timestamp=t,
+        side="SELL",
+        quantity=30,
+    )
+    dec_part = evaluate_trade_proposal(prop_partial, portfolio, entry, policy, pnl, peak)
+    assert dec_part.approved is False
+    assert "LOT_SIZE_MISMATCH" in dec_part.reasons
+
+
