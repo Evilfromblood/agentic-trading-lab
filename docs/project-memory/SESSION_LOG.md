@@ -567,3 +567,9 @@ Append concise entries in reverse chronological order. Record verified outcomes,
   - Python compileall: clean (0 errors) on both Python 3.11 and 3.14.
   - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` clean (0 leaks).
   - Comment check: verified 0 `#` comment characters across all new and edited Python code and tests.
+
+## 2026-11-23 — Session: Milestone 4 (Time Machine) Implementation
+- **Scope:** new package `src/agentic_trading/time_machine/` (`__init__`, `manifest`, `metrics`, `engine`, `validation`, `monte_carlo`), `tests/test_m4_time_machine.py`, ADR-026, and updates to `AUDIT_BRIEF.md`, `CURRENT_STATE.md`, `DECISION_LOG.md`, `NEXT_ACTIONS.md`. No M3 source files were modified. No git operations were performed.
+- **Environment limits:** work done in a Linux Python 3.12 sandbox from `full-project-m3-final-bundle.zip` (SHA-256 `e3d4693cfe09b812985952ee75396601f450acea4c99392491a42dd35a1d6b5b`, verified). No git metadata, no `.venv311` / `.venv`, no network.
+- **Evidence:** 25/25 M4 tests pass under a minimal local `pytest` stand-in; 9/9 deliberate mutations detected; `compileall -q src tests v3-zerodha/src` clean on 3.12; zero `#` comment tokens in new Python files (asserted by test).
+- **Not run:** Ruff, real pytest, full-suite regression, coverage gate, detect-secrets, Python 3.11/3.14 runs.

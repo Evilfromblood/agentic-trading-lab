@@ -1,6 +1,6 @@
 # Current Project State
 
-Last updated: 2026-11-22
+Last updated: 2026-11-23
 
 ## Product direction
 - Markets: India (NSE/BSE) and United States (NYSE/NASDAQ).
@@ -37,6 +37,8 @@ The working tree has local M2b modifications for the market data ingestion found
 - `src/agentic_trading/market_data/provider.py` (M2b/M3: multi-exchange synthetic provider; strict query filtering on symbol/exchange/interval; close-time slicing on rec_close <= end_time and rec_close <= now; dynamic synthetic close time calculation with calendar-month MN1 boundaries; specific exception handling)
 - `tests/test_m3_simulation_and_risk.py` (M3: 35 comprehensive adversarial tests covering point-in-time guards, append-only ledger sign invariants, statutory fee models, accounting conservation, exact zero-drift cost basis residuals, multi-lot fuzzing, ledger replay parity, true tick-grid slippage, short-selling boundaries, realized PnL preservation across exits, prepopulated ledger replay, dividend credit, kill-switch exit allowance, odd-lot full liquidations, long-exit stop loss direction, and proposal risk gate evaluation)
 - `tests/test_m2c_cross_market_foundation.py` (M2c: 29 comprehensive adversarial regression tests covering currency isolation, instrument registry, corporate actions dedup and deep lineage, replay fixture identity binding, parse_constant rejection, naive timestamp rejection, recursive non-finite validation, and stored replay fixture tamper detection)
+- `src/agentic_trading/time_machine/` (M4: `manifest.py` canonical-JSON SHA-256 experiment manifest with `hmac.compare_digest` verification; `metrics.py` Decimal metrics and buy-and-hold benchmark; `engine.py` zero-look-ahead `BacktestEngine` with next-open execution, risk-gate sizing, gap/intra-bar stops, delisting liquidation, point-in-time corporate actions and exact-zero conservation check; `validation.py` train/test split and walk-forward; `monte_carlo.py` seeded bootstrap)
+- `tests/test_m4_time_machine.py` (M4: 25 adversarial tests covering next-open execution, future-bar invariance, gap and collision physics, liquidity cap, delisting, NSE/INR and NASDAQ/USD conservation, manifest reproducibility and per-field tamper detection, walk-forward isolation, seeded Monte Carlo, metric edge cases, corporate actions, input validation, no inline comments)
 - `docs/project-memory/AI_MASTER_CONTEXT.md` (reconciled master architectural context, product vision, 3 signature capabilities, 5-phase roadmap, and non-negotiable rules)
 - `requirements.lock` (pinned dependency specification with exact verified pins: `kiteconnect==5.2.2`, `keyring==25.7.0`, `requests==2.34.2`, `ruff==0.17.3`, `pytest==9.2.0`, `pytest-cov==7.1.0`, `detect-secrets==1.5.0`)
 - `tests/test_claude_batch7_regressions.py` (28 regression tests covering closure encapsulation, slot removal, uniform mutation blocking, keyring bypass, D1/M5 ingestion fail-closed `TRUNCATED_COVERAGE` across NSE/BSE/NYSE/NASDAQ, secret scanning of `requirements.lock`, injected client zero-mutation in session/logout, and POST endpoint blocking)
@@ -55,7 +57,8 @@ Verified local Windows virtual environment output:
 - Milestone 2a: COMPLETE and committed (`1b7e582`).
 - Milestone 2b: COMPLETE and committed (`edd383a`).
 - Milestone 2c: COMPLETE and verified.
-- Milestone 3: COMPLETE (including Batch A, Batch B, Final Polish Pass R1–R8, and D1–D3 Hardening) and verified locally in working tree; ready for Milestone 4 (Time Machine Engine).
+- Milestone 3: COMPLETE (including Batch A, Batch B, Final Polish Pass R1–R8, and D1–D3 Hardening) and verified locally in working tree.
+- Milestone 4 (Time Machine): IMPLEMENTED in the working tree (ADR-026); independent verification pending. Only the 25 new M4 tests were run (Linux Python 3.12, local pytest stand-in). Ruff, full suite, coverage, detect-secrets and the `.venv311` / `.venv` runs are NOT yet executed; the validation evidence above refers to M3 and must be re-run.
 
 ## Development workflow
 1. Claude independently verifies a frozen snapshot.

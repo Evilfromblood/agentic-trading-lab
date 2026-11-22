@@ -1,6 +1,6 @@
-# Milestone 3 & M2b Remediation Audit Brief
+# Milestone 4, Milestone 3 & M2b Remediation Audit Brief
 
-**Status:** Complete — M2a, M2b, M2c, and M3 (including Hardening Batches A & B and Final Polish Pass R1–R8) verified; ready for Time Machine (Milestone 4).  
+**Status:** M2a, M2b, M2c and M3 verified. Milestone 4 (Time Machine) implemented 2026-11-23 and awaiting independent verification (section 6).  
 **Baseline Commit:** `1b7e5829474239495163da1d2d3349eb35ca9744`  
 **Active Branch:** `feature/reliable-foundation`  
 **Audit Bundle:** `full-project-m3-final-bundle.zip`
@@ -103,3 +103,31 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 - **Ruff & Compileall:** All clean, exit code 0.
 - **Secrets:** 0 leaks detected against `.secrets.baseline`.
 - **Inline `#` Comments:** 0 in git diff.
+
+---
+
+## 6. Milestone 4 — Time Machine (ADR-026), Implemented 2026-11-23
+
+**Files:** `src/agentic_trading/time_machine/{__init__,manifest,metrics,engine,validation,monte_carlo}.py`, `tests/test_m4_time_machine.py`.
+
+| Area | Behaviour | Test |
+|---|---|---|
+| Zero look-ahead | Signal at bar `t` close fills at bar `t+1` open; strategy context is `bars[: t+1]` | `test_signal_executes_at_next_open_not_signal_close`, `test_changing_future_bars_never_changes_earlier_decisions` |
+| Gap and collision | Gap-through fills at open; `STOP_FIRST` / `TARGET_FIRST` | `test_gap_through_stop_fills_at_gap_open`, `test_intrabar_collision_policies_and_single_trigger_exits` |
+| Liquidity | Quantity capped at `volume * max_volume_participation`; sub-lot cap rejected | `test_liquidity_participation_cap_and_sub_lot_rejection` |
+| Delisting | `DELISTED` liquidation at open, trading halted | `test_delisting_forces_liquidation_at_open_and_halts_trading` |
+| Conservation | Exact `Decimal("0")` residual, NSE/INR and NASDAQ/USD with statutory fees and slippage | `test_cross_market_conservation_nse_inr_and_nasdaq_usd` |
+| Manifest | Identical inputs give identical `manifest_sha256`; every sealed field tamper fails verification | `test_manifest_reproducibility_and_tamper_detection`, `test_dataset_hash_is_sensitive_to_every_candle_field` |
+| Validation | Train strictly precedes test; fresh strategy per run; no overlapping OOS windows | `test_train_test_split_temporal_separation`, `test_walk_forward_windows_are_ordered_non_overlapping_and_isolated` |
+| Monte Carlo | Bit-for-bit reproducible per seed, seed-sensitive, input validation | `test_seeded_monte_carlo_is_reproducible_and_seed_sensitive`, `test_monte_carlo_degenerate_cases_and_validation` |
+
+**Reviewer attention:** (1) manifest hash is unkeyed (tamper-evident, not authenticated); (2) split/bonus with an open position fails closed rather than rebasing; (3) delisting uses `date >= delisted_date`; (4) risk-gate resize-and-retry in `_execute_buy`; (5) exits are not liquidity-capped; (6) `git_commit` is config-asserted.
+
+**Verification status:** 25 M4 tests pass under a local pytest stand-in on Python 3.12 with 9/9 mutations caught. Ruff, real pytest, the full suite, coverage, detect-secrets and the `.venv311` / `.venv` runs are pending and must be executed locally:
+```powershell
+.\.venv311\Scripts\python.exe -m ruff check src tests v3-zerodha/src
+.\.venv311\Scripts\python.exe -m compileall -q src tests v3-zerodha/src
+.\.venv311\Scripts\python.exe -m pytest --cov=src --cov=v3-zerodha/src --cov-fail-under=85
+detect-secrets-hook --baseline .secrets.baseline
+```
+(repeat with `.venv\Scripts\python.exe`).
