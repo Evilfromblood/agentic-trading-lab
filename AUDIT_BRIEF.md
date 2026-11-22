@@ -1,9 +1,9 @@
-# Milestone 4 Hardened & Multi-Milestone Verification Audit Brief
+# Milestone 5 Verified & Multi-Milestone Verification Audit Brief
 
-**Status:** M2a, M2b, M2c, M3, and M4 verified and hardened (ADR-027).  
+**Status:** M2a, M2b, M2c, M3, M4, and M5 verified and hardened (ADR-028).  
 **Baseline Commit:** `1b7e5829474239495163da1d2d3349eb35ca9744`  
 **Active Branch:** `feature/reliable-foundation`  
-**Audit Bundle:** `full-project-m4-final-bundle.zip`
+**Audit Bundle:** `full-project-m5-review-bundle.zip`
 
 ---
 
@@ -126,6 +126,37 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 ### Suite Verification:
 - **Pytest:** 441 passed in 14.13s on Python 3.11 (`.venv311`), 441 passed in 6.73s on Python 3.14 (`.venv`).
 - **Coverage:** **88.54%** (exceeds `--cov-fail-under=85`).
+- **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
+- **Secrets:** 0 leaks detected against `.secrets.baseline` (scanning `requirements.lock`).
+- **Inline `#` Comments:** 0 comments in git diff.
+
+---
+
+## 7. Milestone 5 — Paper Trading Engine & 7-Agent AI Research Desk (ADR-028), Verified 2026-11-23
+
+**Files:**
+- `src/agentic_trading/paper_trading/{__init__,kill_switch,broker}.py`
+- `src/agentic_trading/risk_engine/proposal_gate.py` (extended)
+- `src/agentic_trading/agents/{__init__,envelope,llm_client,memory,market_analyst,data_analyst,news_analyst,opportunity_scout,strategist,reporter,orchestrator}.py`
+- `tests/test_m5_paper_and_agents.py`
+
+| Area | Component | Behaviour & Hardening | Verification Test |
+|---|---|---|---|
+| Paper Trading | `KillSwitch` | Dual-mechanism hardware-like kill switch (`TRADING_DESK_STOP` env var and `STOP` sentinel file) evaluated in O(1) time without network I/O; fails closed raising `KillSwitchError`. | `test_kill_switch_env_and_sentinel_file_trip_and_clear` |
+| Paper Trading | `PaperBroker` | Idempotent deterministic order IDs (`order_{sha256(...)[:16]}`), duplicate submission protection without double fills, pre-order kill switch & market hours checks, adverse slippage (`ROUND_CEILING` on BUY, `ROUND_FLOOR` on SELL), statutory fee models (`ZeroFeeModel`, `IndiaEquityFeeModel`, `USEquityFeeModel`), and daily reconciliation asserting exact `Decimal("0")` conservation residual. | `test_paper_broker_order_idempotence_and_reconciliation` |
+| Risk Engine | `proposal_gate` | Extended with sector concentration caps (`SECTOR_LIMIT_EXCEEDED`) and corporate event blackout (`EVENT_BLACKOUT`). Rejections fail closed setting `max_allowed_quantity = 0`. M3/M4 backward compatibility 100% preserved. | `test_proposal_risk_gate_sector_concentration_and_event_blackout` |
+| Agents | `AgentEnvelope` & LLM Client | Standardized input/output schemas, deterministic input hashing (`compute_inputs_hash`), automatic retry on schema mismatch with fail-closed fallback (`data_quality="missing"`). Zero third-party LLM framework dependencies (`LLMClient` protocol, offline rule stub, native standard library Ollama client). | `test_envelope_canonical_hashing_and_schema_guard_retry` |
+| Agents | 3-Tier Memory | `WorkingState` ephemeral cycle state, append-only SQLite `DecisionLog` with explicit connection management, and read-only `HumanLessonsStore` preventing autonomous self-modification. | `test_decision_log_sqlite_persistence_and_lessons_store` |
+| Agents | Market Analyst (1) | Deterministic math indicator calculations (SMA 20/50/200, RSI 14, ATR 14, volume ratio, distance from high %, support/resistance) and LLM outlook validation. | `test_market_analyst_technical_indicators_and_envelope` |
+| Agents | Data Analyst (2) | `FundamentalSnapshot` balance sheet/income evaluation with strict filing staleness checks (`max_filing_age_days = 180`). | `test_data_analyst_fundamental_scores_and_staleness_guard` |
+| Agents | News Analyst (3) | `NewsArticle` headline deduplication, untrusted article container prompt injection defense, days to event calculation, and code-enforced event blackout window. | `test_news_analyst_injection_defense_and_event_blackout` |
+| Agents | Scout & Strategist (4 & 5) | `OpportunityScout` liquidity/price filtering, analyst alignment scoring, shortlist ranking capped at 3 with auditable drop reasons. `Strategist` synthesis, deterministic math verification of reward-to-risk and bracket prices, and canonical `TradeProposal` generation. | `test_opportunity_scout_filtering_and_ranking`, `test_strategist_mandate_verification_and_proposal_creation` |
+| Agents | Desk Orchestrator | `TradingDeskOrchestrator` 4-stage sequential pipeline executing kill switch check, parallel fan-out analysis, opportunity scouting & proposal, and authoritative risk/execution/reconciliation/reporting across NSE (INR) and NASDAQ (USD). | `test_orchestrator_end_to_end_desk_cycle_nse_and_nasdaq` |
+| Architecture | Zero Comments & Isolation | Automated AST and tokenizer test enforcing zero inline `#` comments and zero forbidden imports (`zerodha`/`kiteconnect`) across all paper trading and agent modules. | `test_m5_sources_have_no_inline_comments_or_forbidden_imports` |
+
+### Suite Verification:
+- **Pytest:** 453 passed in 6.01s on Python 3.11 (`.venv311`), 453 passed in 4.19s on Python 3.14 (`.venv`).
+- **Coverage:** **88.04%** (exceeds mandatory `--cov-fail-under=85`).
 - **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
 - **Secrets:** 0 leaks detected against `.secrets.baseline` (scanning `requirements.lock`).
 - **Inline `#` Comments:** 0 comments in git diff.

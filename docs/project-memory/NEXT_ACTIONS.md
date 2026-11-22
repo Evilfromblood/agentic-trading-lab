@@ -1,6 +1,6 @@
 # Next Actions
 
-Current priority: verify Milestone 4 (Time Machine) and decide the open design items below. Milestones 2a, 2b, 2c, and 3 are verified.
+Current priority: Milestone 5 (Paper Trading Engine & 7-Agent AI Research Desk) is complete and verified. Next step is independent verification / packaging, followed by Milestone 6 (Live Web Dashboard & Visual Monitoring). Milestones 2a, 2b, 2c, 3, 4, and 5 are verified.
 
 ## Immediate sequence
 1. Baseline M2a committed (`1b7e582`) and pushed to `origin/feature/reliable-foundation`.
@@ -30,7 +30,13 @@ Current priority: verify Milestone 4 (Time Machine) and decide the open design i
    - Walk-forward validation with isolated train/test splits and non-overlapping OOS windows.
    - Seeded Monte Carlo bootstrap with graceful zero-trade handling and deterministic ruin/drawdown quantiles.
    - 441 tests passing across the full suite on Python 3.11 and Python 3.14 with 88.54% coverage. Zero inline `#` comments.
-6. Next: Milestone 5 (Paper Trading Engine & Multi-Strategy Orchestration), market/news intelligence agents, and analytics dashboard.
+6. M5 Paper Trading Engine & 7-Agent AI Research Desk implemented and verified (ADR-028):
+   - Independent hardware-like `KillSwitch` checking env var and filesystem sentinel file in O(1).
+   - `PaperBroker` with idempotent deterministic order IDs, kill switch checks, market hours checks, adverse slippage and statutory fee execution, and daily reconciliation asserting exact zero conservation residual.
+   - Authoritative risk gate extended with sector concentration limits (`SECTOR_LIMIT_EXCEEDED`) and corporate event blackout (`EVENT_BLACKOUT`).
+   - 7-Agent AI Research Desk: strict JSON schema `AgentEnvelope` with input hashing and retries, framework-agnostic `LLMClient` with deterministic stubs, 3-tier memory (`WorkingState`, append-only SQLite `DecisionLog`, read-only `HumanLessonsStore`), Market Analyst, Data Analyst with filing staleness checks, News Analyst with prompt injection containment and blackout enforcement, Opportunity Scout with shortlist capping, Strategist with deterministic math verification of trade proposals, Daily Reporter EOD executive summary, and 4-stage pipeline `TradingDeskOrchestrator`.
+   - 453 tests passing across the full suite on Python 3.11 and Python 3.14 with 88.04% coverage. Zero inline `#` comments.
+7. Next: Milestone 6 (Live Web Dashboard & Visual Monitoring), strategy optimization, and live feed paper testing.
 
 ## Review/remediation loop
 Claude independent verification -> ChatGPT triage and scoped technical direction -> Antigravity implementation and regression tests -> independent verification of the new snapshot. Avoid overlapping audits of unchanged code when a focused remediation cycle is more efficient.

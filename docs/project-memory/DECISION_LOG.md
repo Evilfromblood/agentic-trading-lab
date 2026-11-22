@@ -312,3 +312,40 @@ Append decisions; do not silently rewrite historical decisions. Mark superseded 
   - Compileall: 0 errors on Python 3.11 and 3.14.
   - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files including `requirements.lock`.
   - Zero inline `#` comments verified across all git diff additions.
+
+
+## ADR-028 (Milestone 5) — Paper Trading Engine, Risk Gate Sector/Blackout Extensions & 7-Agent AI Research Desk
+- **Status:** Accepted (2026-11-23)
+- **Context:** Milestone 5 establishes the paper trading execution layer and the 7-agent AI research desk operating strictly within the paper-only boundary. Real-money execution and direct broker order-placement access remain strictly forbidden.
+- **Decisions:**
+  1. **Paper Trading Execution Layer (`src/agentic_trading/paper_trading/`):**
+     - `kill_switch.py`: Independent hardware-like `KillSwitch` checking both environment variable `TRADING_DESK_STOP=1` and filesystem sentinel file `STOP`. Checks execute in O(1) time without network I/O; `is_tripped()` fails closed if tripped. Raises `KillSwitchError(RuntimeError)` with clear context.
+     - `broker.py`: Simulated broker execution engine with `OrderStatus` (`PENDING`, `SUBMITTED`, `FILLED`, `PARTIALLY_FILLED`, `REJECTED`, `CANCELLED`), frozen `PaperOrder`, and frozen `ReconciliationReport`. Order IDs are idempotent deterministic hashes `order_{sha256(as_of:symbol:side:quantity:order_type)[:16]}`; duplicate order submissions return the existing order without re-executing or double-charging. Orders check the kill switch and exchange market hours before submission. Realistic fill against current candle price with always-adverse slippage (`ROUND_CEILING` on BUY, `ROUND_FLOOR` on SELL) and statutory transaction fees (`ZeroFeeModel`, `IndiaEquityFeeModel`, `USEquityFeeModel`). Daily EOD reconciliation compares ledger cash and positions against portfolio snapshots, asserting exact `Decimal("0")` conservation residual.
+  2. **Risk Gate Extensions (`src/agentic_trading/risk_engine/proposal_gate.py`):**
+     - Extended `PortfolioRiskPolicy` with `max_positions_per_sector: int | None = None` and `blackout_symbols: frozenset[str] = frozenset()`.
+     - Extended `evaluate_trade_proposal` with `sector: str | None = None`, `sector_counts: Mapping[str, int] | None = None`, and `event_blackout: bool = False`.
+     - Any BUY proposal on a symbol under event blackout fails closed with `EVENT_BLACKOUT` and `max_allowed_quantity = 0`.
+     - Any BUY proposal exceeding `max_positions_per_sector` fails closed with `SECTOR_LIMIT_EXCEEDED` and `max_allowed_quantity = 0`.
+     - Backward compatibility with M3/M4 is 100% preserved (defaults `None` / `False`).
+  3. **7-Agent AI Research Desk (`src/agentic_trading/agents/`):**
+     - `envelope.py`: Strict input/output schema contract `AgentEnvelope` with canonical JSON serialization, deterministic input hashing (`compute_inputs_hash`), and `invoke_with_schema_guard` implementing 1 retry on validation failure before failing closed with `data_quality="missing"`.
+     - `llm_client.py`: Framework-agnostic `LLMClient` Protocol, deterministic offline `DeterministicStubLLMClient` returning structured JSON rules, and standard library `LocalOllamaJSONClient` using `urllib.request` with zero third-party framework dependencies.
+     - `memory.py`: Three-tier memory architecture with `WorkingState` (in-memory cycle state), `DecisionRecord` and `DecisionLog` (append-only audit log with optional SQLite persistence and explicit `conn.close()` resource management), and `HumanLessonsStore` (read-only human directive store preventing autonomous modification).
+     - `market_analyst.py` (Agent 1): Technical analysis engine computing pure math indicators (SMA 20/50/200, RSI 14, ATR 14, 20-day volume ratio, distance from high %, support/resistance) and validating LLM outlook (`BULLISH`, `BEARISH`, `NEUTRAL`), confidence (0.0 to 1.0), and invalidation level.
+     - `data_analyst.py` (Agent 2): Fundamental health evaluation assessing `FundamentalSnapshot` and enforcing strict filing staleness checks (`max_filing_age_days = 180`), failing closed on stale data.
+     - `news_analyst.py` (Agent 3): Sentiment & catalyst evaluation with headline deduplication, untrusted article container prompt injection defense, days to scheduled event calculation, and code-enforced event blackout window (`event_window_days = 2`).
+     - `opportunity_scout.py` (Agent 4): Multi-market screener filtering candidates by minimum average volume and minimum price, evaluating analyst alignment, and capping shortlists at 3 with auditable drop reasons.
+     - `strategist.py` (Agent 5): Senior portfolio strategist synthesizing analyst signals against `TradingMandate`, verifying `reward_to_risk >= mandate.min_reward_to_risk` and bracket price validity via pure deterministic code checks, and producing canonical `TradeProposal` objects.
+     - `reporter.py`: `DailyReporter` human-readable end-of-day markdown executive summary covering portfolio snapshot, executed orders, rejected proposals, dropped candidates, and reconciliation status.
+     - `orchestrator.py`: `TradingDeskOrchestrator` running a 4-stage sequential pipeline: (1) Kill switch check, (2) Parallel fan-out analysis (Agents 1, 2, 3), (3) Opportunity scouting (Agent 4) & strategy proposal (Agent 5), (4) Authoritative risk gate evaluation, paper execution, decision logging, reconciliation, and EOD reporting.
+  4. **Zero Comments & Framework Independence:**
+     - Zero inline `#` comments enforced across all paper trading and agent modules via automated tokenizer tests.
+     - Zero imports of `zerodha` or `kiteconnect` across all modules.
+- **Consequences:** Provides a complete, deterministic, auditable paper trading execution and AI research desk pipeline. All decisions are logged to an append-only audit trail; broker reconciliations assert exact zero residuals; real-money risk is fully guarded by the paper-only boundary and deterministic kill switch.
+- **Verification Evidence:**
+  - 453 tests pass across the full suite on genuine Python 3.11.9 (`.venv311`) in 6.01s and Python 3.14.4 (`.venv`) in 4.19s.
+  - Test coverage: **88.04%** (exceeding 85% requirement with `--cov-fail-under=85`).
+  - Ruff check: All checks passed!
+  - Compileall: 0 errors on Python 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files including `requirements.lock`.
+  - Zero inline `#` comments verified across all git diff additions.

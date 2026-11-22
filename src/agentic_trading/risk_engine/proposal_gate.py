@@ -1,6 +1,7 @@
 """Deterministic proposal risk gate enforcing portfolio limits and circuit breakers."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -19,6 +20,8 @@ class PortfolioRiskPolicy:
     max_drawdown_pct: Decimal = Decimal("0.05")
     require_stop_loss: bool = True
     max_risk_per_trade_pct: Decimal = Decimal("0.02")
+    max_positions_per_sector: int | None = None
+    blackout_symbols: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         for name, val in (
@@ -32,6 +35,24 @@ class PortfolioRiskPolicy:
                 raise ValueError(f"{name} must be a positive finite Decimal, got {val}")
         if not isinstance(self.require_stop_loss, bool):
             raise TypeError("require_stop_loss must be a boolean")
+        if self.max_positions_per_sector is not None:
+            if (
+                isinstance(self.max_positions_per_sector, bool)
+                or not isinstance(self.max_positions_per_sector, int)
+                or self.max_positions_per_sector <= 0
+            ):
+                raise ValueError(
+                    f"max_positions_per_sector must be a positive integer, got {self.max_positions_per_sector}"
+                )
+        if not isinstance(self.blackout_symbols, (frozenset, set, tuple, list)):
+            raise TypeError(
+                f"blackout_symbols must be a collection of strings, got {type(self.blackout_symbols).__name__}"
+            )
+        object.__setattr__(
+            self,
+            "blackout_symbols",
+            frozenset(s.strip().upper() for s in self.blackout_symbols if isinstance(s, str)),
+        )
 
 
 @dataclass(frozen=True)
@@ -61,6 +82,10 @@ def evaluate_trade_proposal(
     policy: PortfolioRiskPolicy,
     daily_pnl: Money,
     peak_equity: Money,
+    *,
+    sector: str | None = None,
+    sector_counts: Mapping[str, int] | None = None,
+    event_blackout: bool = False,
 ) -> ProposalRiskDecision:
     """Evaluate a trade proposal; deterministically fails closed on any policy or boundary violation."""
     reasons: list[str] = []
@@ -77,6 +102,12 @@ def evaluate_trade_proposal(
         raise TypeError(f"daily_pnl must be a Money instance, got {type(daily_pnl).__name__}")
     if not isinstance(peak_equity, Money):
         raise TypeError(f"peak_equity must be a Money instance, got {type(peak_equity).__name__}")
+    if not isinstance(event_blackout, bool):
+        raise TypeError("event_blackout must be a boolean")
+    if sector is not None and not isinstance(sector, str):
+        raise TypeError("sector must be a string or None")
+    if sector_counts is not None and not isinstance(sector_counts, Mapping):
+        raise TypeError("sector_counts must be a Mapping or None")
 
     base_currency = portfolio.currency
     if (
@@ -187,6 +218,14 @@ def evaluate_trade_proposal(
             reasons.append("INSUFFICIENT_CASH")
 
     if proposal.side == "BUY":
+        if event_blackout or (proposal.instrument.symbol in policy.blackout_symbols):
+            reasons.append("EVENT_BLACKOUT")
+
+        if policy.max_positions_per_sector is not None and sector is not None:
+            current_sector_count = (sector_counts or {}).get(sector, 0)
+            if current_sector_count >= policy.max_positions_per_sector:
+                reasons.append("SECTOR_LIMIT_EXCEEDED")
+
         max_loss = portfolio.total_equity.amount * policy.max_daily_loss_pct
         if daily_pnl.amount <= -max_loss:
             reasons.append("DAILY_LOSS_LIMIT_REACHED")
@@ -210,6 +249,8 @@ def evaluate_trade_proposal(
         "DAILY_LOSS_LIMIT_REACHED",
         "DRAWDOWN_LIMIT_REACHED",
         "UNAUTHORIZED_SHORT",
+        "EVENT_BLACKOUT",
+        "SECTOR_LIMIT_EXCEEDED",
     }
 
     if any(r in blocking_reasons for r in reasons):

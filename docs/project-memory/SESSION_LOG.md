@@ -2,6 +2,35 @@
 
 Append concise entries in reverse chronological order. Record verified outcomes, not intentions.
 
+## 2026-11-23 — Milestone 5 Implementation: Paper Trading Engine & 7-Agent AI Research Desk (ADR-028)
+- Implemented and verified complete Milestone 5 architecture across execution, risk, and multi-agent layers:
+  - **Paper Trading Execution Layer (`src/agentic_trading/paper_trading/`)**:
+    - `kill_switch.py`: Independent hardware-like `KillSwitch` checking env var (`TRADING_DESK_STOP`) and file sentinel (`STOP`) in O(1) time without network I/O; `is_tripped()` fails closed with `KillSwitchError`.
+    - `broker.py`: `OrderStatus`, frozen `PaperOrder`, frozen `ReconciliationReport`, and `PaperBroker` with idempotent deterministic order IDs (`order_{sha256(...)[:16]}`), kill switch check, market hours check, realistic fill against candle price with always-adverse tick-grid slippage and statutory fee models, and daily reconciliation asserting exact `Decimal("0")` residual.
+  - **Risk Gate Extensions (`src/agentic_trading/risk_engine/proposal_gate.py`)**:
+    - Extended `PortfolioRiskPolicy` with `max_positions_per_sector` and `blackout_symbols`.
+    - Extended `evaluate_trade_proposal` with `sector`, `sector_counts`, and `event_blackout`, rejecting BUY proposals with `"EVENT_BLACKOUT"` or `"SECTOR_LIMIT_EXCEEDED"`.
+  - **7-Agent AI Research Desk (`src/agentic_trading/agents/`)**:
+    - `envelope.py`: `AgentEnvelope`, deterministic `compute_inputs_hash`, `invoke_with_schema_guard` with 1 retry before fail-closed.
+    - `llm_client.py`: Framework-agnostic `LLMClient` protocol, offline rule-based `DeterministicStubLLMClient`, and zero-dependency `LocalOllamaJSONClient`.
+    - `memory.py`: 3-tier memory with `WorkingState`, append-only SQLite `DecisionLog` (with explicit connection closure), and read-only `HumanLessonsStore`.
+    - `market_analyst.py`: Pure math indicator calculation (SMA 20/50/200, RSI 14, ATR 14, volume ratio) and LLM outlook validation.
+    - `data_analyst.py`: `FundamentalSnapshot` evaluation with strict filing staleness check (`max_filing_age_days = 180`).
+    - `news_analyst.py`: `NewsArticle` headline deduplication, untrusted article container prompt injection defense, and event blackout window.
+    - `opportunity_scout.py`: Liquidity/price filtering, analyst alignment scoring, shortlist ranking capped at 3 with auditable drop reasons.
+    - `strategist.py`: `TradingMandate` synthesis, deterministic code verification of reward-to-risk and bracket prices, canonical `TradeProposal` generation.
+    - `reporter.py`: `DailyReporter` human-readable EOD markdown executive summary.
+    - `orchestrator.py`: `TradingDeskOrchestrator` 4-stage sequential pipeline executing kill switch, parallel analysis fan-out, scouting & proposal, and authoritative risk/execution/reconciliation/reporting.
+  - **Adversarial Verification Suite (`tests/test_m5_paper_and_agents.py`)**:
+    - 12 comprehensive adversarial tests covering all components, multi-market cycles (NSE and NASDAQ), and tokenizer assertions verifying zero inline `#` comments and zero forbidden imports.
+- **Validation results**:
+  - Full pytest suite: **453 passed in 6.01s** on Python 3.11.9 (`.venv311`) and **453 passed in 4.19s** on Python 3.14.4 (`.venv`).
+  - Genuine pytest-cov coverage: **88.04%** (exceeding mandatory `--cov-fail-under=85`).
+  - Ruff `src`, `tests`, and `v3-zerodha/src`: `All checks passed!`.
+  - Python compileall: passed with exit code 0 on both 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked files.
+  - Zero inline `#` comments verified across all git diff additions.
+
 ## 2026-11-23 — Milestone 4 Adversarial Audit & Hardening (ADR-027)
 - Remediated all audit items and hardened Time Machine engine (`src/agentic_trading/time_machine/`):
   - **Keyed HMAC Experiment Manifests (`manifest.py`, `engine.py`)**:

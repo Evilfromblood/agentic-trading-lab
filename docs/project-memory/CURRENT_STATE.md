@@ -39,6 +39,10 @@ The working tree has local M2b modifications for the market data ingestion found
 - `tests/test_m2c_cross_market_foundation.py` (M2c: 29 comprehensive adversarial regression tests covering currency isolation, instrument registry, corporate actions dedup and deep lineage, replay fixture identity binding, parse_constant rejection, naive timestamp rejection, recursive non-finite validation, and stored replay fixture tamper detection)
 - `src/agentic_trading/time_machine/` (M4: `manifest.py` canonical-JSON SHA-256 experiment manifest with `hmac.compare_digest` verification; `metrics.py` Decimal metrics and buy-and-hold benchmark; `engine.py` zero-look-ahead `BacktestEngine` with next-open execution, risk-gate sizing, gap/intra-bar stops, delisting liquidation, point-in-time corporate actions and exact-zero conservation check; `validation.py` train/test split and walk-forward; `monte_carlo.py` seeded bootstrap)
 - `tests/test_m4_time_machine.py` (M4: 25 adversarial tests covering next-open execution, future-bar invariance, gap and collision physics, liquidity cap, delisting, NSE/INR and NASDAQ/USD conservation, manifest reproducibility and per-field tamper detection, walk-forward isolation, seeded Monte Carlo, metric edge cases, corporate actions, input validation, no inline comments)
+- `src/agentic_trading/paper_trading/` (M5: `kill_switch.py` independent dual-mechanism kill switch checking env var and sentinel file in O(1); `broker.py` simulated paper broker with idempotent deterministic order IDs, kill switch checks, market hours checks, realistic fills with adverse slippage and statutory fees, and daily reconciliation asserting exact zero conservation residual)
+- `src/agentic_trading/agents/` (M5: 7-agent AI research desk with `AgentEnvelope` strict schemas and input hashing, `LLMClient` protocol with deterministic stubs and local Ollama client, 3-tier memory with append-only SQLite `DecisionLog` and read-only `HumanLessonsStore`, Market Analyst, Data Analyst with filing staleness checks, News Analyst with prompt injection containment and event blackout, Opportunity Scout, Strategist with deterministic math verification of trade proposals, Daily Reporter EOD summary, and 4-stage pipeline `TradingDeskOrchestrator`)
+- `src/agentic_trading/risk_engine/proposal_gate.py` (M5: extended with sector position limits `SECTOR_LIMIT_EXCEEDED` and corporate event blackout `EVENT_BLACKOUT` fail-closed checks)
+- `tests/test_m5_paper_and_agents.py` (M5: 12 comprehensive adversarial tests covering kill switch, idempotent paper broker, sector limits, blackout enforcement, envelope validation, LLM client, decision log SQLite persistence, market/data/news analysts, scout/strategist pipeline, end-to-end multi-market orchestrator, and zero inline comments)
 - `docs/project-memory/AI_MASTER_CONTEXT.md` (reconciled master architectural context, product vision, 3 signature capabilities, 5-phase roadmap, and non-negotiable rules)
 - `requirements.lock` (pinned dependency specification with exact verified pins: `kiteconnect==5.2.2`, `keyring==25.7.0`, `requests==2.34.2`, `ruff==0.17.3`, `pytest==9.2.0`, `pytest-cov==7.1.0`, `detect-secrets==1.5.0`)
 - `tests/test_claude_batch7_regressions.py` (28 regression tests covering closure encapsulation, slot removal, uniform mutation blocking, keyring bypass, D1/M5 ingestion fail-closed `TRUNCATED_COVERAGE` across NSE/BSE/NYSE/NASDAQ, secret scanning of `requirements.lock`, injected client zero-mutation in session/logout, and POST endpoint blocking)
@@ -48,17 +52,18 @@ Verified local Windows virtual environment output:
 - Ruff on `src/`, `tests/`, and `v3-zerodha/src`: passed (`All checks passed!`).
 - Python compileall: `python -m compileall -q src tests v3-zerodha/src` passed with exit code 0 on both 3.11.9 and 3.14.4.
 - `git diff --check`: exit code 0 (no whitespace errors or merge markers).
-- Full pytest suite: **441 passed in 14.13s** on genuine Python 3.11.9 (.venv311) and **441 passed in 6.73s** on Python 3.14.4 (.venv).
-- Genuine pytest-cov coverage: **88.54%** (exceeding mandatory 85% threshold with `--cov-fail-under=85`).
+- Full pytest suite: **453 passed in 6.01s** on genuine Python 3.11.9 (.venv311) and **453 passed in 4.19s** on Python 3.14.4 (.venv).
+- Genuine pytest-cov coverage: **88.04%** (exceeding mandatory 85% threshold with `--cov-fail-under=85`).
 - Secret scanning hook: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files, scanning `requirements.lock`.
-- Zero inline `#` comments verified across all new and edited files in M4 Hardening.
+- Zero inline `#` comments verified across all new and edited files in M5.
 
 ## Current milestone
 - Milestone 2a: COMPLETE and committed (`1b7e582`).
 - Milestone 2b: COMPLETE and committed (`edd383a`).
 - Milestone 2c: COMPLETE and verified.
 - Milestone 3: COMPLETE and verified.
-- Milestone 4 (Time Machine): COMPLETE and hardened (ADR-026, ADR-027). Keyed HMAC manifests, end-of-data signal cancellation, zero-trade Monte Carlo support, gap-through stop fills with adverse slippage, and dual-Python verification with 88.54% coverage.
+- Milestone 4 (Time Machine): COMPLETE and hardened (ADR-026, ADR-027).
+- Milestone 5 (Paper Trading Engine & 7-Agent AI Research Desk): COMPLETE and verified (ADR-028). Autonomous paper execution with idempotent deterministic order IDs, kill switch sentinel, portfolio reconciliation, risk gate sector/blackout enforcement, 7 reasoning agents with schema envelope and deterministic code verification, multi-market orchestrator, and dual-Python verification with 88.04% coverage.
 
 ## Development workflow
 1. Claude independently verifies a frozen snapshot.
