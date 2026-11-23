@@ -109,7 +109,8 @@ def test_inr_and_usd_portfolio_isolation(tmp_path: Path) -> None:
                 "symbol": "RELIANCE",
                 "side": "BUY",
                 "quantity": 10,
-                "quote_price": "2000.00",
+                "quote_price": "100.00",
+                "stop_loss": "95.00",
                 "client_order_id": "cid-inr-isolated",
             },
         )
@@ -133,7 +134,8 @@ def test_idempotent_order_submission_limit_pending_and_cancel(tmp_path: Path) ->
             "symbol": "TCS",
             "side": "BUY",
             "quantity": 5,
-            "quote_price": "3500.00",
+            "quote_price": "100.00",
+            "stop_loss": "95.00",
             "client_order_id": "cid-idempotent-1",
         }
         res1 = client.post("/api/orders", json=order_payload)
@@ -154,8 +156,9 @@ def test_idempotent_order_submission_limit_pending_and_cancel(tmp_path: Path) ->
             "symbol": "INFY",
             "side": "BUY",
             "quantity": 10,
-            "quote_price": "1500.00",
-            "limit_price": "1400.00",
+            "quote_price": "100.00",
+            "limit_price": "90.00",
+            "stop_loss": "85.00",
             "client_order_id": "cid-pending-1",
         }
         res3 = client.post("/api/orders", json=limit_payload)
@@ -231,7 +234,8 @@ def test_kill_switch_activation_blocks_orders_and_desk(tmp_path: Path) -> None:
                 "symbol": "TCS",
                 "side": "BUY",
                 "quantity": 5,
-                "quote_price": "3500.00",
+                "quote_price": "100.00",
+                "stop_loss": "95.00",
             },
         )
         assert order_ok.status_code == 200
@@ -351,7 +355,8 @@ def test_dns_rebinding_and_cross_origin_state_mutation_blocked(tmp_path: Path) -
                 "symbol": "TCS",
                 "side": "BUY",
                 "quantity": 1,
-                "quote_price": "3000.00",
+                "quote_price": "100.00",
+                "stop_loss": "95.00",
             },
         )
         assert valid_origin_resp.status_code == 200
@@ -512,7 +517,8 @@ def test_concurrent_state_and_portfolio_conservation(tmp_path: Path) -> None:
                     "symbol": "RELIANCE",
                     "side": "BUY",
                     "quantity": 2,
-                    "quote_price": "2000.00",
+                    "quote_price": "100.00",
+                    "stop_loss": "95.00",
                     "client_order_id": f"conc-inr-cid-{i}",
                 },
             )
@@ -528,7 +534,8 @@ def test_concurrent_state_and_portfolio_conservation(tmp_path: Path) -> None:
                     "symbol": "AAPL",
                     "side": "BUY",
                     "quantity": 1,
-                    "quote_price": "150.00",
+                    "quote_price": "100.00",
+                    "stop_loss": "95.00",
                     "client_order_id": f"conc-usd-cid-{i}",
                 },
             )

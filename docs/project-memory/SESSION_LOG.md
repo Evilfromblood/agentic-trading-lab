@@ -2,6 +2,37 @@
 
 Append concise entries in reverse chronological order. Record verified outcomes, not intentions.
 
+## 2026-11-24 — RC2 Remediation: Manual Order Risk Gating, Lock-Free Kill Switch, Sequential Snapshots & Cache HMAC Isolation (ADR-036)
+- Remediated all 8 audit findings across API, orchestrator, feed bridge, dashboard, and documentation for Release Candidate 2 (RC2):
+  - **Manual Order Risk Gating & Server-Resolved Pricing (`schemas.py`, `state.py`, `routes.py`)**:
+    - Made `quote_price` optional on `SubmitOrderRequest` (`Decimal | None = None`).
+    - Server resolves market price from `ReadOnlyMarketFeedBridge` when `quote_price` is omitted. If supplied, server verifies `abs(quote_price - feed_price) / feed_price <= 0.05` (`ValueError: quote_price deviates from market feed`).
+    - Manual orders are evaluated against authoritative `evaluate_trade_proposal` using portfolio risk policy (`inr_risk_policy` / `usd_risk_policy`). Rejections raise `ProposalRiskRejectionError(ValueError)`, mapped to HTTP 422 in routes (e.g. `MISSING_STOP_LOSS`).
+  - **Lock-Free Kill Switch & Coarse Lock Removal (`state.py`)**:
+    - Removed `with self._lock:` from `set_kill_switch`, enabling immediate $O(1)$ writes/unlinks (<0.5s) without waiting on long-running backtests or desk cycles.
+    - Removed coarse `with self._lock:` wrapping the entire `run_backtest` and `run_desk` methods, acquiring locks only for atomic dictionary mutations (`self._mark_prices`).
+  - **Sequential Snapshot Refresh in Desk Orchestrator (`orchestrator.py`)**:
+    - In `TradingDeskOrchestrator.run_cycle`, initialized `current_snapshot = snapshot` and refreshed `current_snapshot = broker.portfolio.snapshot(...)` after every filled order in Stage 4, preventing multi-ticker cumulative exposure breaches within a single cycle.
+  - **Removal of Fabricated Mock Objects in Desk Runs (`state.py`)**:
+    - Removed synthesized mock `FundamentalSnapshot` and fake `NewsArticle` fabrication, passing `fundamental_snapshot=None` and `news_articles=()` so desk agents evaluate genuine empty/unsupported states without hallucinations.
+  - **Mark-to-Market Valuation & Numeric Residual Check (`state.py`, `dashboard.py`)**:
+    - Added `self._mark_prices` tracking in `TradingLabState`. `get_portfolio_summary` uses `self._mark_prices` for mark-to-market `holdings_value` and `unrealized_pnl` while computing `conservation_residual` strictly on `cost_basis`, guaranteeing exact zero residual drift.
+    - In `dashboard.py`, converted reconciliation check to numeric (`Math.abs(residualNum) > 0`), eliminating false reconciliation warnings on exact `0` or `0.00` residuals.
+  - **Replay Cache HMAC Key Isolation & Configuration (`feed_bridge.py`)**:
+    - `ReadOnlyMarketFeedBridge` accepts optional `hmac_key: bytes | str | None = None`, falling back to `os.environ.get("TRADING_LAB_REPLAY_HMAC_KEY")` and then per-instance `secrets.token_bytes(32)`.
+    - Propagates `hmac_key` consistently to `ReplayFixtureStore` and `StoredReplayFixtureProvider`.
+  - **Zero-Comment Rule Accuracy Clarification**:
+    - Clarified that zero inline comment rule applies strictly to M4–M7 and new/modified code; legacy M2a modules (`adapters.py`, `ingestion.py`, `models.py`, `provider.py`, `quality.py`) retain legitimate comments.
+  - **Comprehensive Platform Regression Tests (`tests/test_e2e_platform_audit.py`)**:
+    - Added 5 regression tests covering manual order risk rejection (422) and price deviation (400), lock-free kill switch responsiveness (<0.5s), sequential multi-ticker snapshot exposure limits, mark-to-market valuation with zero residual, and feed bridge HMAC key isolation.
+- **Validation results**:
+  - Full pytest suite: **495 passed in 10.39s** on Python 3.11.9 (`.venv311`) and Python 3.14.4 (`.venv`).
+  - Genuine pytest-cov coverage: **88.33%** (exceeding mandatory `--cov-fail-under=85`).
+  - Ruff `src`, `tests`, and `v3-zerodha/src`: `All checks passed!`.
+  - Python compileall: passed with exit code 0 on both 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` passed with 0 unbaselined secrets.
+  - Zero inline `#` comments verified across all git diff additions.
+
 ## 2026-11-23 — End-to-End Platform Audit & Release Candidate Verification (ADR-035)
 - Conducted comprehensive cross-milestone audit and end-to-end integration verification across Milestones 1 through 7:
   - **Defense-in-Depth & Paper-Only Boundary Audit**:

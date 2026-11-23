@@ -233,6 +233,7 @@ class TradingDeskOrchestrator:
         if proposals:
             self.paper_broker.kill_switch.assert_clear()
 
+        current_snapshot = snapshot
         for proposal in proposals:
             sym = proposal.instrument.symbol
             target = target_by_ticker[sym]
@@ -242,7 +243,7 @@ class TradingDeskOrchestrator:
 
             decision = evaluate_trade_proposal(
                 proposal=proposal,
-                portfolio=snapshot,
+                portfolio=current_snapshot,
                 entry_price=Money(target.current_candle.close, currency),
                 policy=self.risk_policy,
                 daily_pnl=daily_pnl,
@@ -264,6 +265,11 @@ class TradingDeskOrchestrator:
                 orders.append(paper_order)
                 if target_sector:
                     sector_counts[target_sector] = sector_counts.get(target_sector, 0) + 1
+                current_snapshot = self.paper_broker.portfolio.snapshot(currency, mark_prices, as_of)
+                daily_pnl = Money(current_snapshot.realized_pnl.amount + current_snapshot.unrealized_pnl.amount, currency)
+                if current_snapshot.total_equity.amount > peak_equity.amount:
+                    peak_equity = current_snapshot.total_equity
+
 
             record = DecisionRecord(
                 run_id=run_id,

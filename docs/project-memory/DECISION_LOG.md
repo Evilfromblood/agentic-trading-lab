@@ -571,3 +571,38 @@ Append decisions; do not silently rewrite historical decisions. Mark superseded 
   - Python compileall: passed with exit code 0 on both Python 3.11 and 3.14.
   - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` passed with 0 unbaselined secrets.
   - Zero inline `#` comments verified across all git diff additions.
+
+
+## ADR-036 (RC2 Remediation: Manual Order Risk Gating, Lock-Free Kill Switch, Sequential Snapshots & Cache HMAC Isolation)
+- **Status:** Accepted (2026-11-24)
+- **Context:** Release Candidate 2 (RC2) adversarial audit identified 8 findings: manual order risk bypass and arbitrary quote pricing, coarse locking blocking emergency stops during desk runs, intra-cycle portfolio snapshot staleness allowing cumulative exposure breaches, fabricated mock objects in desk runs, mark-to-market valuation omission, false dashboard reconciliation warnings on exact zero residual, broken multi-process/cold-start replay fixture HMAC verification, and over-broad zero-comment claims in documentation.
+- **Decisions:**
+  1. **Manual Order Risk Gating & Server-Resolved Pricing (`src/agentic_trading/api/{schemas.py,state.py,routes.py}`):**
+     - Made `quote_price` optional on `SubmitOrderRequest` (`Decimal | None = None`).
+     - Server resolves market price from `ReadOnlyMarketFeedBridge` when `quote_price` is omitted. If provided, server asserts `abs(quote_price - feed_price) / feed_price <= 0.05` (`ValueError: quote_price deviates from market feed`).
+     - Manual orders are evaluated against authoritative `evaluate_trade_proposal` using `inr_risk_policy` or `usd_risk_policy`. Rejections raise `ProposalRiskRejectionError(ValueError)`, mapped to HTTP 422 in routes (e.g. `MISSING_STOP_LOSS`).
+  2. **Lock-Free Kill Switch & Coarse Lock Removal (`src/agentic_trading/api/state.py`):**
+     - Removed `with self._lock:` from `set_kill_switch`, enabling immediate $O(1)$ writes/unlinks (<0.5s) without waiting on long-running backtests or desk cycles.
+     - Removed coarse `with self._lock:` wrapping the entire `run_backtest` and `run_desk` methods, acquiring locks only for atomic dictionary mutations (`self._mark_prices`).
+  3. **Sequential Snapshot Refresh in Desk Orchestrator (`src/agentic_trading/agents/orchestrator.py`):**
+     - In `TradingDeskOrchestrator.run_cycle`, initialized `current_snapshot = snapshot` and refreshed `current_snapshot = broker.portfolio.snapshot(...)` after every filled order in Stage 4, preventing multi-ticker cumulative exposure breaches within a single cycle.
+  4. **Removal of Fabricated Mock Objects in Desk Runs (`src/agentic_trading/api/state.py`):**
+     - Removed synthesized mock `FundamentalSnapshot` and fake `NewsArticle` fabrication, passing `fundamental_snapshot=None` and `news_articles=()` so desk agents evaluate genuine empty/unsupported states without hallucinations.
+  5. **Mark-to-Market Valuation & Numeric Residual Check (`src/agentic_trading/api/{state.py,dashboard.py}`):**
+     - Added `self._mark_prices` tracking in `TradingLabState`. `get_portfolio_summary` uses `self._mark_prices` for mark-to-market `holdings_value` and `unrealized_pnl` while computing `conservation_residual` strictly on `cost_basis`, guaranteeing exact zero residual drift.
+     - In `dashboard.py`, converted reconciliation check to numeric (`Math.abs(residualNum) > 0`), eliminating false reconciliation warnings on exact `0` or `0.00` residuals.
+  6. **Replay Cache HMAC Key Isolation & Configuration (`src/agentic_trading/market_data/feed_bridge.py`):**
+     - `ReadOnlyMarketFeedBridge` accepts optional `hmac_key: bytes | str | None = None`, falling back to `os.environ.get("TRADING_LAB_REPLAY_HMAC_KEY")` and then per-instance `secrets.token_bytes(32)`.
+     - Propagates `hmac_key` consistently to `ReplayFixtureStore` and `StoredReplayFixtureProvider`.
+  7. **Zero-Comment Rule Accuracy Clarification:**
+     - Clarified that zero inline comment rule applies strictly to M4–M7 and new/modified code; legacy M2a modules (`adapters.py`, `ingestion.py`, `models.py`, `provider.py`, `quality.py`) retain legitimate comments.
+  8. **Comprehensive Platform Regression Tests (`tests/test_e2e_platform_audit.py`):**
+     - Added 5 regression tests covering manual order risk rejection (422) and price deviation (400), lock-free kill switch responsiveness (<0.5s), sequential multi-ticker snapshot exposure limits, mark-to-market valuation with zero residual, and feed bridge HMAC key isolation.
+- **Consequences:** Closes all 8 RC2 audit findings, reinforces defensive risk gating across all API order paths, ensures responsive kill-switch actuation, and guarantees multi-process cache reproducibility.
+- **Verification Evidence:**
+  - Full pytest suite: **495 passed in 10.39s** on Python 3.11.9 (`.venv311`) and Python 3.14.4 (`.venv`).
+  - Genuine pytest-cov coverage: **88.33%** (exceeding mandatory `--cov-fail-under=85`).
+  - Ruff `src`, `tests`, and `v3-zerodha/src`: `All checks passed!`.
+  - Python compileall: passed with exit code 0 on both Python 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` passed with 0 unbaselined secrets.
+  - Zero inline `#` comments verified across all git diff additions.

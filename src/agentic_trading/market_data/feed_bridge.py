@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import secrets
 import threading
 import urllib.error
 import urllib.parse
@@ -111,10 +113,15 @@ class MarketDataQualityGate:
 class ReplayFixtureStore:
     """Manages persistent HMAC-verified replay fixtures for market data caching."""
 
-    def __init__(self, directory: Path | str) -> None:
+    def __init__(
+        self,
+        directory: Path | str,
+        hmac_key: bytes | str | None = None,
+    ) -> None:
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self.hmac_key = hmac_key
 
     def fixture_id_for(
         self,
@@ -157,15 +164,18 @@ class ReplayFixtureStore:
                 source=source,
                 retrieval_timestamp=now,
             )
-            save_replay_fixture(
-                directory=self.directory,
-                fixture_id=fixture_id,
-                response=response,
-                exchange=exchange,
-                symbol=clean_sym,
-                interval=interval,
-                overwrite=True,
-            )
+            save_kwargs: dict[str, Any] = {
+                "directory": self.directory,
+                "fixture_id": fixture_id,
+                "response": response,
+                "exchange": exchange,
+                "symbol": clean_sym,
+                "interval": interval,
+                "overwrite": True,
+            }
+            if self.hmac_key is not None:
+                save_kwargs["hmac_key"] = self.hmac_key
+            save_replay_fixture(**save_kwargs)
 
     def load_candles(
         self,
@@ -176,10 +186,13 @@ class ReplayFixtureStore:
         with self._lock:
             clean_sym = _validate_symbol(symbol)
             fixture_id = self.fixture_id_for(exchange, clean_sym, interval)
-            provider = StoredReplayFixtureProvider(
-                directory=self.directory,
-                fixture_id=fixture_id,
-            )
+            provider_kwargs: dict[str, Any] = {
+                "directory": self.directory,
+                "fixture_id": fixture_id,
+            }
+            if self.hmac_key is not None:
+                provider_kwargs["hmac_key"] = self.hmac_key
+            provider = StoredReplayFixtureProvider(**provider_kwargs)
             manifest, records = provider._load_and_verify()
             candles: list[Candle] = []
             for rec in records:
@@ -212,12 +225,23 @@ class ReadOnlyMarketFeedBridge:
         cache_dir: Path | str | None = None,
         fetch_fn: Callable[[str], bytes] | None = None,
         timeout_seconds: float = 5.0,
+        hmac_key: bytes | str | None = None,
     ) -> None:
         target_dir = Path(cache_dir) if cache_dir else Path.cwd() / "data" / "replay_fixtures"
-        self.store = ReplayFixtureStore(target_dir)
+        if hmac_key is not None:
+            resolved_key: bytes | str = hmac_key
+        else:
+            env_key = os.environ.get("TRADING_LAB_REPLAY_HMAC_KEY")
+            if env_key:
+                resolved_key = env_key
+            else:
+                resolved_key = secrets.token_bytes(32)
+        self.hmac_key = resolved_key
+        self.store = ReplayFixtureStore(target_dir, hmac_key=resolved_key)
         self.fetch_fn = fetch_fn
         self.timeout_seconds = timeout_seconds
         self._lock = threading.RLock()
+
 
     @staticmethod
     def validate_symbol(symbol: str) -> str:

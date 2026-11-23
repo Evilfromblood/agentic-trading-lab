@@ -426,13 +426,16 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         const warnEl = document.getElementById(prefix + "Warning");
         while (warnEl.firstChild) warnEl.removeChild(warnEl.firstChild);
-        if (!data.reconciled || data.conservation_residual !== "0") {
+        const isReconciled = (data.is_reconciled !== undefined) ? data.is_reconciled : data.reconciled;
+        const residualNum = Number(data.conservation_residual || 0);
+        if (!isReconciled || Math.abs(residualNum) > 0) {
           const warnText = document.createTextNode("Reconciliation Warning: residual " + data.conservation_residual);
           warnEl.appendChild(warnText);
           warnEl.style.display = "block";
         } else {
           warnEl.style.display = "none";
         }
+
       } catch (err) {
         setOutput("Error", "Failed to load portfolio " + curr + ": " + err);
       }

@@ -30,7 +30,6 @@ from agentic_trading.api.state import TradingLabState
 from agentic_trading.market_data.feed_bridge import (
     MarketDataQualityGate,
     ReadOnlyMarketFeedBridge,
-    ReplayFixtureStore,
 )
 from agentic_trading.market_data.feed_bridge import (
     _NoRedirectHandler as FeedNoRedirectHandler,
@@ -159,25 +158,24 @@ def test_feed_bridge_rejects_corrupted_ohlc_and_fails_over(tmp_path: Path) -> No
 
 def test_feed_bridge_fails_over_to_cache_on_network_error(tmp_path: Path) -> None:
     cache_dir = tmp_path / "cache"
-    store = ReplayFixtureStore(cache_dir)
-    syn_candles = ReadOnlyMarketFeedBridge().generate_synthetic_candles(
+
+    def failing_fetch(url: str) -> bytes:
+        raise urllib.error.URLError("Connection refused to feed server")
+
+    bridge = ReadOnlyMarketFeedBridge(cache_dir=cache_dir, fetch_fn=failing_fetch)
+    syn_candles = bridge.generate_synthetic_candles(
         exchange=Exchange.NSE,
         symbol="INFY",
         interval=CandleInterval.D1,
         bars_count=10,
     )
-    store.save_candles(
+    bridge.store.save_candles(
         exchange=Exchange.NSE,
         symbol="INFY",
         interval=CandleInterval.D1,
         candles=syn_candles,
         source="seed_cache",
     )
-
-    def failing_fetch(url: str) -> bytes:
-        raise urllib.error.URLError("Connection refused to feed server")
-
-    bridge = ReadOnlyMarketFeedBridge(cache_dir=cache_dir, fetch_fn=failing_fetch)
     res = bridge.fetch_candles(
         exchange=Exchange.NSE,
         symbol="INFY",

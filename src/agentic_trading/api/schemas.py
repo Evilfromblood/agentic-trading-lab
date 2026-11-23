@@ -115,7 +115,7 @@ class SubmitOrderRequest(BaseModel):
     symbol: str = Field(..., max_length=64)
     side: Literal["BUY", "SELL"]
     quantity: int = Field(..., gt=0)
-    quote_price: Decimal
+    quote_price: Decimal | None = None
     limit_price: Decimal | None = None
     stop_loss: Decimal | None = None
     take_profit: Decimal | None = None
@@ -150,13 +150,14 @@ class SubmitOrderRequest(BaseModel):
 
     @field_validator("quote_price", mode="before")
     @classmethod
-    def validate_quote_price(cls, v: Any) -> Decimal:
-        return _check_finite_positive(v)
+    def validate_quote_price(cls, v: Any) -> Decimal | None:
+        return _check_optional_finite_positive(v)
 
     @field_validator("limit_price", "stop_loss", "take_profit", mode="before")
     @classmethod
     def validate_optional_prices(cls, v: Any) -> Decimal | None:
         return _check_optional_finite_positive(v)
+
 
 
 class OrderResponse(BaseModel):

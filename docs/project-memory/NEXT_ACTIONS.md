@@ -1,6 +1,6 @@
 # Next Actions
 
-Current priority: Release Candidate 1 (Milestones 1–7 Platform Sign-Off — ADR-035) is complete and verified. All milestones (M2a, M2b, M2c, M3, M4, M5, M6, M7, and RC1) are implemented, tested, and verified across Python 3.11 and Python 3.14. Release package `full-project-rc1-bundle.zip` is sealed for final external sign-off.
+Current priority: Release Candidate 2 (RC2 Remediation across API, Orchestrator, Feed Bridge & Dashboard — ADR-036) is complete and verified. All milestones (M2a, M2b, M2c, M3, M4, M5, M6, M7, RC1, and RC2) are implemented, tested, and verified across Python 3.11 and Python 3.14. Release package `full-project-rc2-bundle.zip` is sealed for final external sign-off.
 
 ## Immediate sequence
 1. Baseline M2a committed (`1b7e582`) and pushed to `origin/feature/reliable-foundation`.

@@ -1,6 +1,6 @@
 # Current Project State
 
-Last updated: 2026-11-23
+Last updated: 2026-11-24
 
 ## Product direction
 - Markets: India (NSE/BSE) and United States (NYSE/NASDAQ).
@@ -57,10 +57,10 @@ Verified local Windows virtual environment output:
 - Ruff on `src/`, `tests/`, and `v3-zerodha/src`: passed (`All checks passed!`).
 - Python compileall: `python -m compileall -q src tests v3-zerodha/src` passed with exit code 0 on both 3.11.9 and 3.14.4.
 - `git diff --check`: exit code 0 (no whitespace errors or merge markers).
-- Full pytest suite: **490 passed in 16.58s** on genuine Python 3.11.9 (.venv311) and **490 passed in 14.72s** on Python 3.14.4 (.venv).
+- Full pytest suite: **495 passed in 10.39s** on genuine Python 3.11.9 (.venv311) and **495 passed in 11.20s** on Python 3.14.4 (.venv).
 - Genuine pytest-cov coverage: **88.33%** (exceeding mandatory 85% threshold with `--cov-fail-under=85`).
 - Secret scanning hook: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files, scanning `requirements.lock`.
-- Zero inline `#` comments verified across all new and edited files in M6 and M7.
+- Zero inline `#` comments verified across all audited modules in M4 through M7 (`time_machine/`, `paper_trading/`, `agents/`, `api/`, `feed_bridge.py`) and all new tests (legacy M2a foundation files retain original comments).
 
 ## Current milestone
 - Milestone 2a: COMPLETE and committed (`1b7e582`).
@@ -72,6 +72,7 @@ Verified local Windows virtual environment output:
 - Milestone 6 (Local-First FastAPI Backend & Interactive Web Dashboard): COMPLETE and hardened (ADR-030, ADR-031). Local REST API and self-contained web dashboard with zero external CDN dependencies, DNS-rebinding & CSRF protection, CSP defensive headers, strict Pydantic bounds, thread-safe concurrency with exact 0 residual conservation, persistent SQLite audit trails, and dual-Python verification (472 passed, 88.17% coverage).
 - Milestone 7 (Read-Only Market Feed Bridge, HMAC Replay Cache & Loopback Ollama Desk Integration): COMPLETE and hardened (ADR-032, ADR-033, ADR-034). Delayed market data feed bridge with no-redirect SSRF opener, path-traversal symbol defense, thread-safe HMAC cache, loopback Ollama client with markdown fence stripping and NaN rejection, transparent failover client, `/api/feed` endpoint, minimalist dashboard UI, human-readable desk reporting, and dual-Python verification (487 passed, 88.33% coverage).
 - Release Candidate 1 (RC1 Platform Sign-Off): COMPLETE and verified (ADR-035). Full cross-milestone audit, defense-in-depth security verification, exact mathematical accounting conservation, causal backtesting physics, multi-agent determinism, and end-to-end integration test (`tests/test_e2e_platform_audit.py`). Dual-Python verification (490 passed, 88.33% coverage). Frozen package: `full-project-rc1-bundle.zip`.
+- Release Candidate 2 (RC2 Remediation): COMPLETE and verified (ADR-036). Resolved all 8 audit findings: manual order risk gating and server-resolved pricing, lock-free kill switch responsiveness (<0.5s), intra-cycle multi-ticker sequential snapshot exposure limits, removal of fabricated mock objects in desk runs, mark-to-market valuation with exact zero residual conservation, numeric reconciliation check in dashboard JS, and replay cache HMAC key isolation/propagation. Dual-Python verification (495 passed, 88.33% coverage). Frozen package: `full-project-rc2-bundle.zip`.
 
 ## Development workflow
 1. Claude independently verifies a frozen snapshot.

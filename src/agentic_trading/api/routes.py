@@ -20,7 +20,7 @@ from agentic_trading.api.schemas import (
     PortfolioSummaryResponse,
     SubmitOrderRequest,
 )
-from agentic_trading.api.state import TradingLabState
+from agentic_trading.api.state import ProposalRiskRejectionError, TradingLabState
 from agentic_trading.market_data.instruments import CurrencyMismatchError
 from agentic_trading.paper_trading.kill_switch import KillSwitchError
 
@@ -85,6 +85,8 @@ def submit_order(
         raise HTTPException(status_code=409, detail=f"Order rejected: {reason}")
     try:
         return state.submit_order(payload)
+    except ProposalRiskRejectionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except (CurrencyMismatchError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except KillSwitchError as exc:

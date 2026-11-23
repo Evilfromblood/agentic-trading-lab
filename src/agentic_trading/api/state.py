@@ -7,7 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from agentic_trading.agents.data_analyst import DataAnalyst, FundamentalSnapshot
+from agentic_trading.agents.data_analyst import DataAnalyst
 from agentic_trading.agents.llm_client import (
     DeterministicStubLLMClient,
     FailoverLLMClient,
@@ -15,7 +15,7 @@ from agentic_trading.agents.llm_client import (
 )
 from agentic_trading.agents.market_analyst import MarketAnalyst
 from agentic_trading.agents.memory import DecisionLog, HumanLessonsStore
-from agentic_trading.agents.news_analyst import NewsAnalyst, NewsArticle
+from agentic_trading.agents.news_analyst import NewsAnalyst
 from agentic_trading.agents.opportunity_scout import OpportunityScout
 from agentic_trading.agents.orchestrator import (
     TradingDeskOrchestrator,
@@ -44,7 +44,10 @@ from agentic_trading.market_data.instruments import (
 from agentic_trading.market_data.models import Candle, CandleInterval, Exchange
 from agentic_trading.paper_trading.broker import PaperBroker
 from agentic_trading.paper_trading.kill_switch import KillSwitch, KillSwitchError
-from agentic_trading.risk_engine.proposal_gate import PortfolioRiskPolicy
+from agentic_trading.risk_engine.proposal_gate import (
+    PortfolioRiskPolicy,
+    evaluate_trade_proposal,
+)
 from agentic_trading.simulation.costs import (
     BasisPointsSlippageModel,
     IndiaEquityFeeModel,
@@ -65,6 +68,11 @@ from agentic_trading.time_machine.engine import (
 )
 from agentic_trading.time_machine.manifest import verify_manifest_integrity
 from agentic_trading.time_machine.monte_carlo import run_seeded_monte_carlo
+
+
+class ProposalRiskRejectionError(ValueError):
+    """Raised when a trade proposal fails risk validation."""
+    pass
 
 
 class SmaCrossStrategy(Strategy):
@@ -125,6 +133,7 @@ class TradingLabState:
         initial_usd_deposit: Decimal = Decimal("25000"),
     ) -> None:
         self._lock = threading.RLock()
+        self._mark_prices: dict[tuple[Exchange, str], Money] = {}
         self.stop_file = Path(stop_file)
         self.kill_switch = KillSwitch(stop_file=self.stop_file)
         self.db_path = Path(db_path) if db_path else None
@@ -186,13 +195,12 @@ class TradingLabState:
         raise ValueError(f"Unsupported currency: {currency_str}")
 
     def set_kill_switch(self, active: bool, reason: str = "MANUAL_UI_STOP") -> bool:
-        with self._lock:
-            if active:
-                self.stop_file.write_text(reason, encoding="utf-8")
-            else:
-                if self.stop_file.exists():
-                    self.stop_file.unlink()
-            return self.kill_switch.is_active()
+        if active:
+            self.stop_file.write_text(reason, encoding="utf-8")
+        else:
+            if self.stop_file.exists():
+                self.stop_file.unlink()
+        return self.kill_switch.is_active()
 
     def get_portfolio_summary(
         self,
@@ -207,7 +215,7 @@ class TradingLabState:
             marks: dict[tuple[Exchange, str], Money] = {}
             for key, pos in broker.portfolio._positions.items():
                 if pos.quantity != 0:
-                    marks[key] = pos.average_cost
+                    marks[key] = self._mark_prices.get(key, pos.average_cost)
             snapshot = broker.portfolio.snapshot(currency, marks, moment)
 
             positions_list: list[PositionSummary] = []
@@ -268,41 +276,66 @@ class TradingLabState:
             )
 
     def submit_order(self, request: SubmitOrderRequest) -> OrderResponse:
+        if self.kill_switch.is_active():
+            raise KillSwitchError(self.kill_switch.reason() or "Kill switch active")
+
+        exchange = Exchange(request.exchange)
+        symbol = request.symbol.strip().upper()
+        side = request.side.strip().upper()
+
+        if exchange in {Exchange.NSE, Exchange.BSE}:
+            currency = Currency.INR
+            broker = self.inr_broker
+            risk_policy = self.inr_risk_policy
+        elif exchange in {Exchange.NYSE, Exchange.NASDAQ}:
+            currency = Currency.USD
+            broker = self.usd_broker
+            risk_policy = self.usd_risk_policy
+        else:
+            raise ValueError(f"Unsupported exchange: {exchange}")
+
+        tick = Decimal("0.05") if currency == Currency.INR else Decimal("0.01")
+        instrument = Instrument(
+            exchange=exchange,
+            symbol=symbol,
+            currency=currency,
+            tick_size=tick,
+            lot_size=1,
+        )
+
+        feed_res = self.feed_bridge.fetch_candles(
+            exchange=exchange,
+            symbol=symbol,
+            interval=CandleInterval.D1,
+            bars_count=1,
+            mode="synthetic",
+        )
+        feed_price = feed_res.candles[-1].close
+
+        if request.quote_price is not None:
+            deviation = abs(request.quote_price - feed_price) / feed_price
+            if deviation > Decimal("0.05"):
+                raise ValueError("quote_price deviates from market feed")
+            effective_price = request.quote_price
+        else:
+            effective_price = feed_price
+
         with self._lock:
-            if self.kill_switch.is_active():
-                raise KillSwitchError(self.kill_switch.reason() or "Kill switch active")
-
-            exchange = Exchange(request.exchange)
-            symbol = request.symbol.strip().upper()
-            side = request.side.strip().upper()
-
-            if exchange in {Exchange.NSE, Exchange.BSE}:
-                currency = Currency.INR
-                broker = self.inr_broker
-            elif exchange in {Exchange.NYSE, Exchange.NASDAQ}:
-                currency = Currency.USD
-                broker = self.usd_broker
-            else:
-                raise ValueError(f"Unsupported exchange: {exchange}")
-
-            tick = Decimal("0.05") if currency == Currency.INR else Decimal("0.01")
-            instrument = Instrument(
-                exchange=exchange,
-                symbol=symbol,
-                currency=currency,
-                tick_size=tick,
-                lot_size=1,
-            )
-
+            self._mark_prices[(exchange, symbol)] = Money(effective_price, currency)
             now = datetime.now(timezone.utc)
+            if broker.portfolio.ledger.entries:
+                last_ts = broker.portfolio.ledger.entries[-1].timestamp
+                if now < last_ts:
+                    now = last_ts
+
             candle = Candle(
                 symbol=symbol,
                 exchange=exchange,
                 interval=CandleInterval.M1,
-                open=request.quote_price,
-                high=max(request.quote_price, request.limit_price or request.quote_price),
-                low=min(request.quote_price, request.limit_price or request.quote_price),
-                close=request.quote_price,
+                open=effective_price,
+                high=max(effective_price, request.limit_price or effective_price),
+                low=min(effective_price, request.limit_price or effective_price),
+                close=effective_price,
                 volume=100000,
                 timestamp=now - timedelta(minutes=1),
                 source="api_manual",
@@ -339,6 +372,33 @@ class TradingLabState:
                 take_profit=target_money,
             )
 
+            mark_prices = dict(self._mark_prices)
+            current_snapshot = broker.portfolio.snapshot(currency, mark_prices, now)
+            daily_pnl = Money(
+                current_snapshot.realized_pnl.amount + current_snapshot.unrealized_pnl.amount,
+                currency,
+            )
+            peak_equity = Money(
+                max(current_snapshot.total_equity.amount, Decimal("1.0")),
+                currency,
+            )
+            decision = evaluate_trade_proposal(
+                proposal=proposal,
+                portfolio=current_snapshot,
+                entry_price=Money(effective_price, currency),
+                policy=risk_policy,
+                daily_pnl=daily_pnl,
+                peak_equity=peak_equity,
+            )
+            if not decision.approved:
+                raise ProposalRiskRejectionError(
+                    f"Order rejected by risk policy: {', '.join(decision.reasons)}"
+                )
+            if decision.max_allowed_quantity < proposal.quantity:
+                raise ProposalRiskRejectionError(
+                    f"Order rejected by risk policy: requested quantity {proposal.quantity} exceeds max allowed {decision.max_allowed_quantity}"
+                )
+
             order = broker.submit_order(
                 run_id=request.run_id,
                 proposal=proposal,
@@ -347,27 +407,27 @@ class TradingLabState:
                 tick_size=instrument.tick_size,
             )
 
-            return OrderResponse(
-                client_order_id=order.client_order_id,
-                run_id=order.run_id,
-                exchange=order.exchange.value,
-                symbol=order.symbol,
-                side=order.side,
-                quantity=order.quantity,
-                filled_quantity=order.filled_quantity,
-                status=order.status.value,
-                limit_price=order.limit_price.amount if order.limit_price else None,
-                stop_loss=order.stop_loss.amount if order.stop_loss else None,
-                take_profit=order.take_profit.amount if order.take_profit else None,
-                average_fill_price=order.average_fill_price.amount
-                if order.average_fill_price
-                else None,
-                fees=order.fees.amount,
-                slippage=order.slippage.amount,
-                reject_reason=order.reject_reason,
-                submitted_at=order.submitted_at,
-                filled_at=order.filled_at,
-            )
+        return OrderResponse(
+            client_order_id=order.client_order_id,
+            run_id=order.run_id,
+            exchange=order.exchange.value,
+            symbol=order.symbol,
+            side=order.side,
+            quantity=order.quantity,
+            filled_quantity=order.filled_quantity,
+            status=order.status.value,
+            limit_price=order.limit_price.amount if order.limit_price else None,
+            stop_loss=order.stop_loss.amount if order.stop_loss else None,
+            take_profit=order.take_profit.amount if order.take_profit else None,
+            average_fill_price=order.average_fill_price.amount
+            if order.average_fill_price
+            else None,
+            fees=order.fees.amount,
+            slippage=order.slippage.amount,
+            reject_reason=order.reject_reason,
+            submitted_at=order.submitted_at,
+            filled_at=order.filled_at,
+        )
 
     def cancel_order(self, currency_str: str, client_order_id: str) -> OrderResponse:
         with self._lock:
@@ -396,203 +456,183 @@ class TradingLabState:
             )
 
     def run_backtest(self, request: BacktestRequest) -> BacktestResponse:
-        with self._lock:
-            exchange = Exchange(request.exchange)
-            symbol = request.symbol.strip().upper()
-            currency = Currency(request.currency)
+        exchange = Exchange(request.exchange)
+        symbol = request.symbol.strip().upper()
+        currency = Currency(request.currency)
 
-            if exchange in {Exchange.NSE, Exchange.BSE} and currency != Currency.INR:
-                raise CurrencyMismatchError("NSE/BSE exchange requires INR currency")
-            if exchange in {Exchange.NYSE, Exchange.NASDAQ} and currency != Currency.USD:
-                raise CurrencyMismatchError("NYSE/NASDAQ exchange requires USD currency")
+        if exchange in {Exchange.NSE, Exchange.BSE} and currency != Currency.INR:
+            raise CurrencyMismatchError("NSE/BSE exchange requires INR currency")
+        if exchange in {Exchange.NYSE, Exchange.NASDAQ} and currency != Currency.USD:
+            raise CurrencyMismatchError("NYSE/NASDAQ exchange requires USD currency")
 
-            tick = Decimal("0.05") if currency == Currency.INR else Decimal("0.01")
+        tick = Decimal("0.05") if currency == Currency.INR else Decimal("0.01")
+        instrument = Instrument(
+            exchange=exchange,
+            symbol=symbol,
+            currency=currency,
+            tick_size=tick,
+            lot_size=1,
+        )
+
+        fee_model = (
+            IndiaEquityFeeModel() if currency == Currency.INR else USEquityFeeModel()
+        )
+        slippage_model = BasisPointsSlippageModel()
+        risk_policy = (
+            self.inr_risk_policy if currency == Currency.INR else self.usd_risk_policy
+        )
+
+        config = BacktestConfig(
+            initial_capital=Money(request.initial_capital, currency),
+            risk_policy=risk_policy,
+            fee_model=fee_model,
+            slippage_model=slippage_model,
+            position_size_pct=Decimal("0.10"),
+            default_stop_loss_pct=Decimal("0.03"),
+            default_take_profit_pct=Decimal("0.06"),
+            random_seed=request.random_seed,
+        )
+
+        fetch_res = self.feed_bridge.fetch_candles(
+            exchange=exchange,
+            symbol=symbol,
+            interval=CandleInterval.D1,
+            bars_count=request.bars_count,
+            mode=request.feed_source,
+        )
+        candles = list(fetch_res.candles)
+
+        strategy = SmaCrossStrategy(fast=5, slow=15)
+        result = self.backtest_engine.run(instrument, candles, strategy, config)
+
+        mc_summary = run_seeded_monte_carlo(
+            result.trades,
+            initial_capital=config.initial_capital,
+            iterations=request.monte_carlo_runs,
+            seed=request.random_seed,
+        )
+
+        manifest_verified = verify_manifest_integrity(result.manifest)
+        residual = ledger_conservation_residual(result.ledger, result.final_snapshot)
+
+        metrics_dict: dict[str, Any] = {
+            "total_trades": result.metrics.total_trades,
+            "winning_trades": result.metrics.winning_trades,
+            "losing_trades": result.metrics.losing_trades,
+            "win_rate_pct": str(result.metrics.win_rate_pct),
+            "profit_factor": str(result.metrics.profit_factor),
+            "total_return_pct": str(result.metrics.total_return_pct),
+            "max_drawdown_pct": str(result.metrics.max_drawdown_pct),
+            "sharpe_ratio": str(result.metrics.sharpe_ratio),
+            "expectancy_r": str(result.metrics.expectancy_r),
+        }
+
+        monte_carlo_dict: dict[str, Any] = {
+            "iterations": mc_summary.iterations,
+            "trade_count": mc_summary.trade_count,
+            "return_pct_p50": str(mc_summary.return_pct_p50),
+            "return_pct_p05": str(mc_summary.return_pct_p05),
+            "return_pct_p95": str(mc_summary.return_pct_p95),
+            "max_drawdown_pct_p50": str(mc_summary.max_drawdown_pct_p50),
+            "max_drawdown_pct_p95": str(mc_summary.max_drawdown_pct_p95),
+            "probability_of_loss_pct": str(mc_summary.probability_of_loss_pct),
+            "probability_of_ruin_pct": str(mc_summary.probability_of_ruin_pct),
+        }
+
+        return BacktestResponse(
+            manifest_id=result.manifest.manifest_id,
+            manifest_sha256=result.manifest.manifest_sha256,
+            manifest_verified=manifest_verified,
+            metrics=metrics_dict,
+            monte_carlo=monte_carlo_dict,
+            trade_count=len(result.trades),
+            conservation_residual=residual,
+            feed_source=fetch_res.source,
+        )
+
+    def run_desk(self, request: DeskRunRequest) -> DeskRunResponse:
+        if self.kill_switch.is_active():
+            raise KillSwitchError(self.kill_switch.reason() or "Kill switch active")
+
+        exchange = Exchange(request.exchange)
+        currency = Currency(request.currency)
+
+        if exchange in {Exchange.NSE, Exchange.BSE} and currency != Currency.INR:
+            raise CurrencyMismatchError("NSE/BSE exchange requires INR currency")
+        if exchange in {Exchange.NYSE, Exchange.NASDAQ} and currency != Currency.USD:
+            raise CurrencyMismatchError("NYSE/NASDAQ exchange requires USD currency")
+
+        broker = self.inr_broker if currency == Currency.INR else self.usd_broker
+        risk_policy = (
+            self.inr_risk_policy if currency == Currency.INR else self.usd_risk_policy
+        )
+
+        if request.llm_backend == "ollama":
+            active_llm = FailoverLLMClient(
+                LocalOllamaJSONClient(default_model=request.ollama_model),
+                fallback=self.llm_client,
+            )
+        else:
+            active_llm = self.llm_client
+
+        orchestrator = TradingDeskOrchestrator(
+            paper_broker=broker,
+            risk_policy=risk_policy,
+            mandate=self.mandate,
+            market_analyst=MarketAnalyst(active_llm),
+            data_analyst=DataAnalyst(active_llm),
+            news_analyst=NewsAnalyst(active_llm),
+            opportunity_scout=OpportunityScout(),
+            strategist=Strategist(active_llm),
+            decision_log=self.decision_log,
+            lessons_store=self.lessons_store,
+        )
+
+        as_of = datetime.now(timezone.utc)
+        run_id = (
+            request.run_id
+            if request.run_id and request.run_id.strip()
+            else f"desk-{as_of.strftime('%Y%m%d%H%M%S')}"
+        )
+
+        tick = Decimal("0.05") if currency == Currency.INR else Decimal("0.01")
+        watchlist_targets: list[WatchlistTarget] = []
+
+        for sym in request.watchlist:
             instrument = Instrument(
                 exchange=exchange,
-                symbol=symbol,
+                symbol=sym,
                 currency=currency,
                 tick_size=tick,
                 lot_size=1,
             )
-
-            fee_model = (
-                IndiaEquityFeeModel() if currency == Currency.INR else USEquityFeeModel()
-            )
-            slippage_model = BasisPointsSlippageModel()
-            risk_policy = (
-                self.inr_risk_policy if currency == Currency.INR else self.usd_risk_policy
-            )
-
-            config = BacktestConfig(
-                initial_capital=Money(request.initial_capital, currency),
-                risk_policy=risk_policy,
-                fee_model=fee_model,
-                slippage_model=slippage_model,
-                position_size_pct=Decimal("0.10"),
-                default_stop_loss_pct=Decimal("0.03"),
-                default_take_profit_pct=Decimal("0.06"),
-                random_seed=request.random_seed,
-            )
-
             fetch_res = self.feed_bridge.fetch_candles(
                 exchange=exchange,
-                symbol=symbol,
+                symbol=sym,
                 interval=CandleInterval.D1,
-                bars_count=request.bars_count,
+                bars_count=25,
                 mode=request.feed_source,
+                as_of=as_of,
             )
-            candles = list(fetch_res.candles)
-
-            strategy = SmaCrossStrategy(fast=5, slow=15)
-            result = self.backtest_engine.run(instrument, candles, strategy, config)
-
-            mc_summary = run_seeded_monte_carlo(
-                result.trades,
-                initial_capital=config.initial_capital,
-                iterations=request.monte_carlo_runs,
-                seed=request.random_seed,
+            bars = list(fetch_res.candles)
+            context = BarContext(
+                instrument=instrument,
+                decision_time=bars[-1].close_time,
+                bars=tuple(bars),
             )
+            with self._lock:
+                self._mark_prices[(exchange, sym)] = Money(bars[-1].close, currency)
 
-            manifest_verified = verify_manifest_integrity(result.manifest)
-            residual = ledger_conservation_residual(result.ledger, result.final_snapshot)
-
-            metrics_dict: dict[str, Any] = {
-                "total_trades": result.metrics.total_trades,
-                "winning_trades": result.metrics.winning_trades,
-                "losing_trades": result.metrics.losing_trades,
-                "win_rate_pct": str(result.metrics.win_rate_pct),
-                "profit_factor": str(result.metrics.profit_factor),
-                "total_return_pct": str(result.metrics.total_return_pct),
-                "max_drawdown_pct": str(result.metrics.max_drawdown_pct),
-                "sharpe_ratio": str(result.metrics.sharpe_ratio),
-                "expectancy_r": str(result.metrics.expectancy_r),
-            }
-
-            monte_carlo_dict: dict[str, Any] = {
-                "iterations": mc_summary.iterations,
-                "trade_count": mc_summary.trade_count,
-                "return_pct_p50": str(mc_summary.return_pct_p50),
-                "return_pct_p05": str(mc_summary.return_pct_p05),
-                "return_pct_p95": str(mc_summary.return_pct_p95),
-                "max_drawdown_pct_p50": str(mc_summary.max_drawdown_pct_p50),
-                "max_drawdown_pct_p95": str(mc_summary.max_drawdown_pct_p95),
-                "probability_of_loss_pct": str(mc_summary.probability_of_loss_pct),
-                "probability_of_ruin_pct": str(mc_summary.probability_of_ruin_pct),
-            }
-
-            return BacktestResponse(
-                manifest_id=result.manifest.manifest_id,
-                manifest_sha256=result.manifest.manifest_sha256,
-                manifest_verified=manifest_verified,
-                metrics=metrics_dict,
-                monte_carlo=monte_carlo_dict,
-                trade_count=len(result.trades),
-                conservation_residual=residual,
-                feed_source=fetch_res.source,
-            )
-
-    def run_desk(self, request: DeskRunRequest) -> DeskRunResponse:
-        with self._lock:
-            if self.kill_switch.is_active():
-                raise KillSwitchError(self.kill_switch.reason() or "Kill switch active")
-
-            exchange = Exchange(request.exchange)
-            currency = Currency(request.currency)
-
-            if exchange in {Exchange.NSE, Exchange.BSE} and currency != Currency.INR:
-                raise CurrencyMismatchError("NSE/BSE exchange requires INR currency")
-            if exchange in {Exchange.NYSE, Exchange.NASDAQ} and currency != Currency.USD:
-                raise CurrencyMismatchError("NYSE/NASDAQ exchange requires USD currency")
-
-            broker = self.inr_broker if currency == Currency.INR else self.usd_broker
-            risk_policy = (
-                self.inr_risk_policy if currency == Currency.INR else self.usd_risk_policy
-            )
-
-            if request.llm_backend == "ollama":
-                active_llm = FailoverLLMClient(
-                    LocalOllamaJSONClient(default_model=request.ollama_model),
-                    fallback=self.llm_client,
-                )
-            else:
-                active_llm = self.llm_client
-
-            orchestrator = TradingDeskOrchestrator(
-                paper_broker=broker,
-                risk_policy=risk_policy,
-                mandate=self.mandate,
-                market_analyst=MarketAnalyst(active_llm),
-                data_analyst=DataAnalyst(active_llm),
-                news_analyst=NewsAnalyst(active_llm),
-                opportunity_scout=OpportunityScout(),
-                strategist=Strategist(active_llm),
-                decision_log=self.decision_log,
-                lessons_store=self.lessons_store,
-            )
-
-            as_of = datetime.now(timezone.utc)
-            run_id = (
-                request.run_id
-                if request.run_id and request.run_id.strip()
-                else f"desk-{as_of.strftime('%Y%m%d%H%M%S')}"
-            )
-
-            tick = Decimal("0.05") if currency == Currency.INR else Decimal("0.01")
-            watchlist_targets: list[WatchlistTarget] = []
-
-            for sym in request.watchlist:
-                instrument = Instrument(
-                    exchange=exchange,
-                    symbol=sym,
-                    currency=currency,
-                    tick_size=tick,
-                    lot_size=1,
-                )
-                fetch_res = self.feed_bridge.fetch_candles(
-                    exchange=exchange,
-                    symbol=sym,
-                    interval=CandleInterval.D1,
-                    bars_count=25,
-                    mode=request.feed_source,
-                    as_of=as_of,
-                )
-                bars = list(fetch_res.candles)
-                context = BarContext(
+            watchlist_targets.append(
+                WatchlistTarget(
                     instrument=instrument,
-                    decision_time=bars[-1].close_time,
-                    bars=tuple(bars),
+                    current_candle=bars[-1],
+                    context=context,
+                    fundamental_snapshot=None,
+                    news_articles=(),
+                    scheduled_events=(),
                 )
-                fundamental = FundamentalSnapshot(
-                    symbol=sym,
-                    as_of_filing=as_of.date(),
-                    revenue_growth_yoy=Decimal("0.18"),
-                    operating_margin=Decimal("0.22"),
-                    fcf_margin=Decimal("0.15"),
-                    debt_to_equity=Decimal("0.4"),
-                    interest_coverage=Decimal("5.0"),
-                    pe_vs_peer_median=Decimal("1.0"),
-                    dilution_yoy=Decimal("0.0"),
-                    peer_set=(),
-                )
-                news = (
-                    NewsArticle(
-                        headline=f"Growth accelerates for {sym}",
-                        source="Wire",
-                        source_tier=1,
-                        published_at=as_of,
-                        summary="Solid operational performance in recent quarter.",
-                    ),
-                )
-                watchlist_targets.append(
-                    WatchlistTarget(
-                        instrument=instrument,
-                        current_candle=bars[-1],
-                        context=context,
-                        fundamental_snapshot=fundamental,
-                        news_articles=news,
-                        scheduled_events=(),
-                    )
-                )
+            )
 
             result = orchestrator.run_cycle(
                 run_id=run_id,
