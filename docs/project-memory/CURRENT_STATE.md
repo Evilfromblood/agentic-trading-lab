@@ -44,7 +44,10 @@ The working tree has local M2b modifications for the market data ingestion found
 - `src/agentic_trading/risk_engine/proposal_gate.py` (M5: extended with sector position limits `SECTOR_LIMIT_EXCEEDED` and corporate event blackout `EVENT_BLACKOUT` fail-closed checks)
 - `tests/test_m5_paper_and_agents.py` (M5: 16 comprehensive adversarial tests covering kill switch fail-closed checks, idempotent paper broker, limit price bounds, order cancellation state machine, thread-safe concurrent submissions, sector limits, blackout enforcement, envelope validation, LLM client, decision log SQLite persistence, market/data/news analysts, scout/strategist pipeline, deterministic multi-agent fan-out, end-to-end multi-market orchestrator, and zero inline comments)
 - `src/agentic_trading/api/` (M6: local-first FastAPI HTTP REST API and visual monitoring dashboard: `schemas.py` enforcing `paper_only=True` and positive finite bounds, `state.py` thread-safe multi-currency portfolio manager, `routes.py` REST endpoints for health/kill-switch/orders/portfolios/backtest/desk, `dashboard.py` self-contained single-page UI with zero external CDN scripts, `app.py` FastAPI app factory with clean lifespan and localhost-only binding)
-- `tests/test_m6_api_and_dashboard.py` (M6: 10 comprehensive tests covering dashboard rendering without external CDN links, INR/USD portfolio isolation, idempotent orders and limit pending/cancellation, kill switch blocking, backtest verified manifest, desk cycle run and SQLite decision log retrieval, zero inline comments, and architectural import boundaries)
+- `tests/test_m6_api_and_dashboard.py` (M6: 15 comprehensive tests covering dashboard rendering without external CDN links, INR/USD portfolio isolation, idempotent orders and limit pending/cancellation, kill switch blocking, backtest verified manifest, desk cycle run and SQLite decision log retrieval, DNS-rebinding & CSRF protection, CSP defensive headers, concurrency stress testing, restart continuity, and zero inline comments)
+- `src/agentic_trading/market_data/feed_bridge.py` (M7: SSRF-hardened `ReadOnlyMarketFeedBridge`, `MarketDataQualityGate` structural and geometric validation, and HMAC-SHA256 authenticated `ReplayFixtureStore` supporting deterministic `"synthetic"`, `"cache"`, and `"delayed_feed"` modes)
+- `src/agentic_trading/agents/llm_client.py` (M7: `LocalOllamaJSONClient` loopback isolation, model regex sanitation, 256KB cap, and `FailoverLLMClient` with transparent offline stub fallback)
+- `tests/test_m7_feeds_and_ollama.py` (M7: 11 comprehensive adversarial tests covering SSRF blocks, payload caps, non-finite constant rejection, HMAC cache tamper detection, loopback Ollama validation, failover client resilience, feed endpoint execution, and zero inline comments)
 - `docs/project-memory/AI_MASTER_CONTEXT.md` (reconciled master architectural context, product vision, 3 signature capabilities, 5-phase roadmap, and non-negotiable rules)
 - `requirements.lock` (pinned dependency specification with exact verified pins: `kiteconnect==5.2.2`, `keyring==25.7.0`, `requests==2.34.2`, `ruff==0.17.3`, `pytest==9.2.0`, `pytest-cov==7.1.0`, `detect-secrets==1.5.0`)
 - `tests/test_claude_batch7_regressions.py` (28 regression tests covering closure encapsulation, slot removal, uniform mutation blocking, keyring bypass, D1/M5 ingestion fail-closed `TRUNCATED_COVERAGE` across NSE/BSE/NYSE/NASDAQ, secret scanning of `requirements.lock`, injected client zero-mutation in session/logout, and POST endpoint blocking)
@@ -54,10 +57,10 @@ Verified local Windows virtual environment output:
 - Ruff on `src/`, `tests/`, and `v3-zerodha/src`: passed (`All checks passed!`).
 - Python compileall: `python -m compileall -q src tests v3-zerodha/src` passed with exit code 0 on both 3.11.9 and 3.14.4.
 - `git diff --check`: exit code 0 (no whitespace errors or merge markers).
-- Full pytest suite: **472 passed in 7.58s** on genuine Python 3.11.9 (.venv311) and **472 passed in 3.92s** on Python 3.14.4 (.venv).
-- Genuine pytest-cov coverage: **88.17%** (exceeding mandatory 85% threshold with `--cov-fail-under=85`).
+- Full pytest suite: **483 passed in 25.99s** on genuine Python 3.11.9 (.venv311) and **483 passed in 23.92s** on Python 3.14.4 (.venv).
+- Genuine pytest-cov coverage: **88.34%** (exceeding mandatory 85% threshold with `--cov-fail-under=85`).
 - Secret scanning hook: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files, scanning `requirements.lock`.
-- Zero inline `#` comments verified across all new and edited files in M6.
+- Zero inline `#` comments verified across all new and edited files in M6 and M7.
 
 ## Current milestone
 - Milestone 2a: COMPLETE and committed (`1b7e582`).
@@ -67,6 +70,7 @@ Verified local Windows virtual environment output:
 - Milestone 4 (Time Machine): COMPLETE and hardened (ADR-026, ADR-027).
 - Milestone 5 (Paper Trading Engine & 7-Agent AI Research Desk): COMPLETE and hardened (ADR-028, ADR-029).
 - Milestone 6 (Local-First FastAPI Backend & Interactive Web Dashboard): COMPLETE and hardened (ADR-030, ADR-031). Local REST API and self-contained web dashboard with zero external CDN dependencies, DNS-rebinding & CSRF protection, CSP defensive headers, strict Pydantic bounds, thread-safe concurrency with exact 0 residual conservation, persistent SQLite audit trails, and dual-Python verification (472 passed, 88.17% coverage).
+- Milestone 7 (Read-Only Market Feed Bridge, HMAC Replay Cache & Loopback Ollama Desk Integration): COMPLETE and hardened (ADR-032). Delayed market data feed bridge with SSRF protection, quality gate validation, HMAC fixture caching, loopback Ollama inference client, transparent failover client, `/api/feed` endpoint, dashboard controls, and dual-Python verification (483 passed, 88.34% coverage).
 
 ## Development workflow
 1. Claude independently verifies a frozen snapshot.

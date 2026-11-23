@@ -192,6 +192,7 @@ class BacktestRequest(BaseModel):
     bars_count: int = Field(default=100, ge=10, le=500)
     random_seed: int = Field(default=42, ge=0)
     monte_carlo_runs: int = Field(default=500, ge=1, le=5000)
+    feed_source: Literal["synthetic", "cache", "delayed_feed"] = "synthetic"
 
     @field_validator("symbol")
     @classmethod
@@ -235,6 +236,7 @@ class BacktestResponse(BaseModel):
     monte_carlo: dict[str, Any]
     trade_count: int
     conservation_residual: Decimal
+    feed_source: str = Field(default="synthetic", max_length=64)
     paper_only: Literal[True] = True
 
 
@@ -245,6 +247,9 @@ class DeskRunRequest(BaseModel):
     exchange: Literal["NSE", "BSE", "NYSE", "NASDAQ"] = "NSE"
     currency: Literal["INR", "USD"] = "INR"
     run_id: str | None = Field(default=None, max_length=64)
+    llm_backend: Literal["stub", "ollama"] = "stub"
+    ollama_model: str = Field(default="gemma4:12b", min_length=1, max_length=64)
+    feed_source: Literal["synthetic", "cache", "delayed_feed"] = "synthetic"
 
     @field_validator("watchlist")
     @classmethod
@@ -279,6 +284,16 @@ class DeskRunRequest(BaseModel):
             raise ValueError("run_id must not exceed 64 characters")
         return clean
 
+    @field_validator("ollama_model")
+    @classmethod
+    def validate_ollama_model(cls, v: str) -> str:
+        clean = v.strip() if isinstance(v, str) else ""
+        if not clean:
+            raise ValueError("ollama_model must be a non-empty string")
+        if len(clean) > 64:
+            raise ValueError("ollama_model must not exceed 64 characters")
+        return clean
+
 
 class DeskRunResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -291,6 +306,8 @@ class DeskRunResponse(BaseModel):
     rejected_proposals: list[dict[str, Any]]
     report_markdown: str
     reconciled: bool
+    llm_backend: str = Field(default="stub", max_length=64)
+    feed_source: str = Field(default="synthetic", max_length=64)
     paper_only: Literal[True] = True
 
 
@@ -306,3 +323,18 @@ class DecisionRecordItem(BaseModel):
     strategist_proposal: dict[str, Any] | None = None
     risk_decision: dict[str, Any] | None = None
     paper_order: dict[str, Any] | None = None
+
+
+class FeedCandlesResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    paper_only: Literal[True] = True
+    exchange: str = Field(..., max_length=64)
+    symbol: str = Field(..., max_length=64)
+    currency: str = Field(..., max_length=64)
+    interval: str = Field(..., max_length=64)
+    source: str = Field(..., max_length=64)
+    candle_count: int
+    latest_close: Decimal
+    latest_timestamp: datetime
+    warnings: list[str] = []

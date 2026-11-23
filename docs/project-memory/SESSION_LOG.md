@@ -2,6 +2,35 @@
 
 Append concise entries in reverse chronological order. Record verified outcomes, not intentions.
 
+## 2026-11-23 — Milestone 7 Implementation: Read-Only Market Feed Bridge, HMAC Replay Cache & Loopback Ollama Desk Integration (ADR-032)
+- Implemented and verified complete Milestone 7 architecture across market data feed bridge, local Ollama LLM client, and API/dashboard integration:
+  - **SSRF-Hardened Feed Bridge (`src/agentic_trading/market_data/feed_bridge.py`)**:
+    - Created `ReadOnlyMarketFeedBridge` enforcing strict `https` scheme, allowlisted hostnames (`query1.finance.yahoo.com`, `query2.finance.yahoo.com`), and 1 MB payload limits.
+    - Implemented `parse_constant=_reject_constant` blocking NaN/Infinity injection.
+    - Added timezone-aware candle normalization (`Asia/Kolkata` for NSE/BSE, `America/New_York` for NYSE/NASDAQ).
+    - Added structural & geometric `MarketDataQualityGate` validation (monotonic timestamps, uniform intervals, high/low bounds, positive OHLC, non-negative volume, 50% max bar jump).
+    - Integrated Tier-2 HMAC-SHA256 `ReplayFixtureStore` for offline reproducible replay fixture caching.
+    - Supported three deterministic modes: `"synthetic"`, `"cache"`, and `"delayed_feed"` with automatic fallback.
+  - **Loopback-Isolated Ollama Client (`src/agentic_trading/agents/llm_client.py`)**:
+    - Created `LocalOllamaJSONClient` restricted strictly to loopback addresses (`127.0.0.1`, `localhost`, `::1`, `[::1]`) and HTTP/HTTPS schemes.
+    - Sanitized model names via regex (`^[A-Za-z0-9._:-]{1,64}$`) defaulting to `gemma4:12b`.
+    - Enforced 256 KB response payload limit and strict JSON parsing.
+    - Implemented `FailoverLLMClient(primary, fallback)` delegating gracefully to deterministic offline stub on connection, timeout, network error, or invalid JSON.
+  - **API & Dashboard Integration (`src/agentic_trading/api/`)**:
+    - Added `GET /api/feed/{exchange}/{symbol}` endpoint with query validation.
+    - Extended `DeskRunRequest` with `llm_backend`, `ollama_model`, and `feed_source`.
+    - Extended `BacktestRequest` with `feed_source`.
+    - Added feed source and LLM backend selectors to local single-page dashboard with zero external CDN scripts.
+  - **Adversarial Regression Tests (`tests/test_m7_feeds_and_ollama.py`)**:
+    - Created 11 comprehensive adversarial tests covering SSRF rejection, payload size caps, non-finite constant rejection, quality gate geometry violations, HMAC cache roundtrip and tamper detection, loopback-only Ollama validation, 256 KB payload caps, failover resilience, feed route execution, and AST/tokenizer verification for zero inline comments and zero forbidden imports.
+- **Validation results**:
+  - Full pytest suite: **483 passed in 25.99s** on Python 3.11.9 (`.venv311`) and **483 passed in 23.92s** on Python 3.14.4 (`.venv`).
+  - Genuine pytest-cov coverage: **88.34%** (exceeding mandatory `--cov-fail-under=85`).
+  - Ruff `src`, `tests`, and `v3-zerodha/src`: `All checks passed!`.
+  - Python compileall: passed with exit code 0 on both 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files.
+  - Zero inline `#` comments verified across all git diff additions.
+
 ## 2026-11-23 — Milestone 6 Adversarial Hardening: DNS-Rebinding, Origin Defense, CSP Headers & Concurrency (ADR-031)
 - Hardened Milestone 6 FastAPI application and dashboard against adversarial web attacks, payload tampering, and thread races:
   - **Host Header & DNS-Rebinding Protection (`src/agentic_trading/api/app.py`)**:

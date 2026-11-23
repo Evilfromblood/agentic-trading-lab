@@ -186,6 +186,21 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   </div>
 
   <div class="actions">
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <label for="feedSourceSelect" style="color: var(--text-muted); font-size: 0.9rem;">Feed Source:</label>
+      <select id="feedSourceSelect" style="background: var(--card-bg); color: var(--text); border: 1px solid var(--border); padding: 8px 12px; border-radius: 6px;">
+        <option value="synthetic">Synthetic (Deterministic)</option>
+        <option value="cache">Replay Fixture Cache</option>
+        <option value="delayed_feed">Delayed Public Feed</option>
+      </select>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <label for="llmBackendSelect" style="color: var(--text-muted); font-size: 0.9rem;">LLM Backend:</label>
+      <select id="llmBackendSelect" style="background: var(--card-bg); color: var(--text); border: 1px solid var(--border); padding: 8px 12px; border-radius: 6px;">
+        <option value="stub">Deterministic Stub</option>
+        <option value="ollama">Local Ollama (gemma4:12b)</option>
+      </select>
+    </div>
     <button id="runDeskBtn" class="btn btn-accent">Run 7-Agent Desk Cycle (RELIANCE/TCS)</button>
     <button id="runBacktestBtn" class="btn btn-success">Run Time Machine Backtest (100 Bars)</button>
     <button id="refreshBtn" class="btn" style="background: #334155; color: #fff;">Refresh Portfolios</button>
@@ -272,7 +287,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     }
 
     async function runDeskCycle() {
-      renderOutput("Initiating 7-Agent Research Desk cycle for RELIANCE & TCS...");
+      const feedSource = document.getElementById("feedSourceSelect").value;
+      const llmBackend = document.getElementById("llmBackendSelect").value;
+      renderOutput("Initiating 7-Agent Research Desk cycle (Feed: " + feedSource + ", LLM: " + llmBackend + ")...");
       try {
         const res = await fetch("/api/desk/run", {
           method: "POST",
@@ -280,7 +297,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           body: JSON.stringify({
             watchlist: ["RELIANCE", "TCS"],
             exchange: "NSE",
-            currency: "INR"
+            currency: "INR",
+            feed_source: feedSource,
+            llm_backend: llmBackend,
+            ollama_model: "gemma4:12b"
           })
         });
         if (!res.ok) {
@@ -297,7 +317,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     }
 
     async function runBacktest() {
-      renderOutput("Executing Time Machine backtest (100 synthetic bars, RELIANCE, NSE)...");
+      const feedSource = document.getElementById("feedSourceSelect").value;
+      renderOutput("Executing Time Machine backtest (Feed: " + feedSource + ", RELIANCE, NSE)...");
       try {
         const res = await fetch("/api/backtest", {
           method: "POST",
@@ -309,7 +330,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             initial_capital: "1000000",
             bars_count: 100,
             random_seed: 42,
-            monte_carlo_runs: 500
+            monte_carlo_runs: 500,
+            feed_source: feedSource
           })
         });
         if (!res.ok) {
@@ -325,6 +347,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           "Manifest ID:          " + data.manifest_id,
           "Manifest SHA-256:     " + data.manifest_sha256,
           "Manifest Verified:    " + data.manifest_verified,
+          "Feed Source:          " + data.feed_source,
           "Completed Trades:     " + data.trade_count,
           "Conservation Resid:   " + data.conservation_residual,
           "",

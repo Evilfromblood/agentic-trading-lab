@@ -1,17 +1,17 @@
-# Milestone 6 Verified & Multi-Milestone Full Verification Audit Brief
+# Milestone 7 Verified & Multi-Milestone Full Verification Audit Brief
 
-**Status:** M2a, M2b, M2c, M3, M4, M5, and M6 verified and hardened (ADR-028, ADR-029, ADR-030, ADR-031).
+**Status:** M2a, M2b, M2c, M3, M4, M5, M6, and M7 verified and hardened (ADR-028, ADR-029, ADR-030, ADR-031, ADR-032).
 **Baseline Commit:** `1b7e5829474239495163da1d2d3349eb35ca9744`  
 **Active Branch:** `feature/reliable-foundation`  
-**Audit Bundle:** `full-project-m6-final-bundle.zip`
+**Audit Bundle:** `full-project-m7-review-bundle.zip`
 
 ---
 
 ## 1. Executive Summary
 
-Milestone 6 (Local-First FastAPI Backend & Interactive Web Dashboard) has been implemented, hardened against adversarial attacks (DNS-rebinding, cross-origin CSRF, unbounded payloads, race conditions), and verified alongside all prior milestones (M2a, M2b, M2c, M3, M4, M5).
+Milestone 7 (Read-Only Market Feed Bridge, HMAC Replay Cache & Loopback Ollama Desk Integration) has been implemented and hardened alongside all prior milestones (M2a, M2b, M2c, M3, M4, M5, M6).
 
-All 472 tests pass across the entire test suite on both genuine Python 3.11.9 (`.venv311`) and Python 3.14.4 (`.venv`). Measured test coverage is **88.17%** (strictly enforcing `--cov-fail-under=85`). Ruff linting, compileall byte-compilation on both Python versions, and blocking secret scanning (`detect-secrets-hook --baseline .secrets.baseline` version 1.5.0 scanning `requirements.lock`) pass with zero errors and zero unbaselined secrets. All new and existing API source files and tests enforce zero inline `#` comments via automated tokenizer tests.
+All 483 tests pass across the entire test suite on both genuine Python 3.11.9 (`.venv311`) and Python 3.14.4 (`.venv`). Measured test coverage is **88.34%** (strictly enforcing `--cov-fail-under=85`). Ruff linting, compileall byte-compilation on both Python versions, and blocking secret scanning (`detect-secrets-hook --baseline .secrets.baseline` version 1.5.0 scanning `requirements.lock`) pass with zero errors and zero unbaselined secrets. All new and existing source files and tests enforce zero inline `#` comments via automated tokenizer tests.
 
 ---
 
@@ -159,4 +159,56 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 - **Coverage:** **87.91%** (exceeds mandatory `--cov-fail-under=85`).
 - **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
 - **Secrets:** 0 leaks detected against `.secrets.baseline` (scanning `requirements.lock`).
+- **Inline `#` Comments:** 0 comments in git diff.
+
+---
+
+## 8. Milestone 6 — Local-First FastAPI Backend & Interactive Web Dashboard (ADR-030 & ADR-031 Hardened), Verified 2026-11-23
+
+**Files:**
+- `src/agentic_trading/api/{__init__,app,schemas,state,routes,dashboard}.py`
+- `tests/test_m6_api_and_dashboard.py`
+
+| Area | Component | Behaviour & Hardening | Verification Test |
+|---|---|---|---|
+| Security | `app.py` Middleware | DNS-rebinding protection rejecting unauthorized `Host` headers outside localhost/127.0.0.1; cross-origin state mutation guard blocking non-local `Origin` and `Referer` headers on POST/PUT/DELETE. | `test_dns_rebinding_and_cross_origin_state_mutation_blocked` |
+| Security | Defensive CSP | Content-Security-Policy (`default-src 'none'`), `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` on all responses. | `test_security_headers_present` |
+| Validation | Pydantic Schemas | `extra="forbid"`, string length caps (`<= 64`), bounded watchlist (`<= 20`), bounded bars and Monte Carlo runs, non-positive price/qty rejection. | `test_schema_extra_forbid_and_bounds_rejection` |
+| Concurrency | State & Portfolios | Thread-safe `RLock` synchronization across virtual INR/USD portfolios, order submission, backtest, and desk runs; exact `0` conservation residual preserved under 16-thread contention. | `test_concurrent_state_and_portfolio_conservation` |
+| Dashboard | Local Web UI | Self-contained single-page UI with zero external CDN scripts or stylesheet links; Emergency Stop kill switch button. | `test_dashboard_renders_and_has_no_external_cdn_links` |
+
+### Suite Verification:
+- **Pytest:** 472 passed in 7.58s on Python 3.11 (`.venv311`), 472 passed in 3.92s on Python 3.14 (`.venv`).
+- **Coverage:** **88.17%** (exceeds `--cov-fail-under=85`).
+- **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
+- **Secrets:** 0 leaks detected against `.secrets.baseline`.
+- **Inline `#` Comments:** 0 comments in git diff.
+
+---
+
+## 9. Milestone 7 — Read-Only Market Feed Bridge, HMAC Replay Cache & Loopback Ollama Desk Integration (ADR-032), Verified 2026-11-23
+
+**Files:**
+- `src/agentic_trading/market_data/feed_bridge.py`
+- `src/agentic_trading/market_data/__init__.py`
+- `src/agentic_trading/agents/llm_client.py`
+- `src/agentic_trading/agents/__init__.py`
+- `src/agentic_trading/api/{schemas,state,routes,dashboard}.py`
+- `tests/test_m7_feeds_and_ollama.py`
+
+| Area | Component | Behaviour & Hardening | Verification Test |
+|---|---|---|---|
+| Feed Bridge | `ReadOnlyMarketFeedBridge` | SSRF-hardened fetcher strictly enforcing HTTPS and allowlisted hosts (`query1.finance.yahoo.com`, `query2.finance.yahoo.com`), 1 MB payload limits, and non-finite constant rejection (`parse_constant=_reject_constant`). | `test_feed_bridge_ssrf_and_payload_caps`, `test_feed_bridge_rejects_non_finite_constants` |
+| Quality Gate | `MarketDataQualityGate` | Batch validation checking monotonic timestamps, interval uniformity, positive OHLC, high/low envelopes, non-negative volume, and 50% max bar jump thresholds. | `test_quality_gate_detects_geometry_and_jump_violations` |
+| Replay Cache | `ReplayFixtureStore` | Tier-2 HMAC-SHA256 authenticated cache with deterministic `"synthetic"`, `"cache"`, and `"delayed_feed"` modes and automatic fallback. Directory traversal prevention. | `test_replay_fixture_store_cache_and_tamper_detection`, `test_feed_bridge_fallback_to_cache_and_synthetic` |
+| LLM Client | `LocalOllamaJSONClient` | Restricted strictly to loopback addresses (`127.0.0.1`, `localhost`, `::1`, `[::1]`) and HTTP/HTTPS schemes; model name regex sanitization; 256 KB response payload cap; strict JSON parsing. | `test_ollama_client_loopback_isolation_and_model_validation`, `test_ollama_client_payload_cap_and_json_parsing` |
+| LLM Failover | `FailoverLLMClient` | Transparent failover delegating to deterministic offline stub on network errors, timeouts, connection issues, or malformed JSON responses. | `test_failover_client_delegates_to_fallback` |
+| API & UI | Feed & Desk Integration | `GET /api/feed/{exchange}/{symbol}` endpoint with bounds validation; `llm_backend` and `feed_source` parameters in backtest and desk run APIs; UI selectors with zero external scripts. | `test_feed_endpoint_and_state_integration` |
+| Architecture | Zero Comments & Isolation | Automated tokenizer and AST verification enforcing 0 inline `#` comments and 0 forbidden imports. | `test_m7_sources_have_no_inline_comments_or_forbidden_imports` |
+
+### Suite Verification:
+- **Pytest:** 483 passed in 25.99s on Python 3.11 (`.venv311`), 483 passed in 23.92s on Python 3.14 (`.venv`).
+- **Coverage:** **88.34%** (exceeds mandatory `--cov-fail-under=85`).
+- **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
+- **Secrets:** 0 leaks detected against `.secrets.baseline`.
 - **Inline `#` Comments:** 0 comments in git diff.

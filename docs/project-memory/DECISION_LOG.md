@@ -466,3 +466,41 @@ Append decisions; do not silently rewrite historical decisions. Mark superseded 
   - Python compileall: passed with exit code 0 on both Python 3.11 and 3.14.
   - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files including `requirements.lock`.
   - Zero inline `#` comments verified across all git diff additions.
+
+
+## ADR-032 (Milestone 7: Read-Only Market Feed Bridge, HMAC Replay Cache & Loopback Ollama Desk Integration)
+- **Status:** Accepted (2026-11-23)
+- **Context:** Milestone 6 delivered a local FastAPI dashboard and REST API backed by deterministic synthetic series and offline stub LLMs. Milestone 7 bridges the system to optional read-only delayed market data feeds and genuine local Ollama inference without introducing live trading risks, external cloud dependencies, non-deterministic API failures, or SSRF attack vectors.
+- **Decisions:**
+  1. **SSRF-Hardened Delayed Market Data Bridge (`src/agentic_trading/market_data/feed_bridge.py`):**
+     - Implemented `ReadOnlyMarketFeedBridge` strictly enforcing `https` scheme and allowlisted hostnames (`query1.finance.yahoo.com`, `query2.finance.yahoo.com`).
+     - Enforced strict payload size cap (`_MAX_PAYLOAD_BYTES = 1_048_576`, 1 MB) to guard against resource exhaustion.
+     - Rejected non-finite JSON constants (`parse_constant=_reject_constant`) preventing NaN/Infinity injection.
+     - Provided pluggable, offline-injectable `fetch_fn` for test isolation and offline fallback.
+     - Transformed external timestamps into timezone-aware `Candle` instances aligned with official exchange timezones (`Asia/Kolkata` for NSE/BSE, `America/New_York` for NYSE/NASDAQ).
+  2. **Structural & Geometric Quality Gate (`MarketDataQualityGate`):**
+     - Enforced batch-level chronological ordering, interval uniformity, positive pricing, high/low envelope validity, non-negative volume, and maximum allowable percentage jump thresholds (50% max bar jump).
+  3. **Cryptographically Authenticated Replay Fixture Store (`ReplayFixtureStore`):**
+     - Implemented local cache using Tier-2 HMAC-SHA256 authenticated fixture manifests (`StoredReplayFixtureProvider` and `save_replay_fixture`).
+     - Guarded filesystem reads/writes against directory traversal by sanitizing exchange and symbol identifiers.
+     - Supported three deterministic modes: `"synthetic"`, `"cache"`, and `"delayed_feed"` (with graceful fallback to cache and synthetic data).
+  4. **Loopback-Isolated Ollama Client & Transparent Failover (`src/agentic_trading/agents/llm_client.py`):**
+     - Implemented `LocalOllamaJSONClient` restricted strictly to loopback addresses (`127.0.0.1`, `localhost`, `::1`, `[::1]`) and HTTP/HTTPS schemes.
+     - Sanitized model names via strict regex (`^[A-Za-z0-9._:-]{1,64}$`) defaulting to `gemma4:12b`.
+     - Enforced a 256 KB response payload cap and strict JSON decoding.
+     - Implemented `FailoverLLMClient(primary, fallback)` which transparently delegates to the deterministic offline stub on network errors, timeouts, connection failures, or malformed responses.
+  5. **API & Dashboard Integration (`src/agentic_trading/api/`):**
+     - Added `GET /api/feed/{exchange}/{symbol}` endpoint with query parameters `source` and `bars`.
+     - Extended `BacktestRequest` with `feed_source: Literal["synthetic", "cache", "delayed_feed"] = "synthetic"`.
+     - Extended `DeskRunRequest` with `llm_backend: Literal["stub", "ollama", "failover"] = "stub"`, `ollama_model: str = "gemma4:12b"`, and `feed_source`.
+     - Integrated source and backend controls into `dashboard.py` maintaining zero external CDN scripts and zero inline `#` comments.
+  6. **Adversarial Regression Suite (`tests/test_m7_feeds_and_ollama.py`):**
+     - Created 11 comprehensive tests covering SSRF prevention, 1 MB payload limits, non-finite constant rejection, quality gate geometry violations, HMAC cache roundtrip and tamper detection, loopback-only Ollama validation, 256 KB response caps, failover client resilience, feed route execution, and AST/tokenizer verification for zero inline comments and zero forbidden imports.
+- **Consequences:** Enables operators to backtest and paper trade against authenticated delayed market data and local LLM models while maintaining complete isolation from live broker order execution and external cloud LLM dependencies.
+- **Verification Evidence:**
+  - Full pytest suite: **483 passed in 25.99s** on Python 3.11.9 (`.venv311`) and **483 passed in 23.92s** on Python 3.14.4 (`.venv`).
+  - Genuine pytest-cov coverage: **88.34%** (exceeding mandatory `--cov-fail-under=85`).
+  - Ruff `src`, `tests`, and `v3-zerodha/src`: `All checks passed!`.
+  - Python compileall: passed with exit code 0 on both Python 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files.
+  - Zero inline `#` comments verified across all new and edited files.

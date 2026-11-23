@@ -1,7 +1,7 @@
 """FastAPI endpoints for paper portfolio management, Kill Switch, orders, backtesting, and research desk."""
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
@@ -11,6 +11,7 @@ from agentic_trading.api.schemas import (
     DecisionRecordItem,
     DeskRunRequest,
     DeskRunResponse,
+    FeedCandlesResponse,
     HealthResponse,
     KillSwitchRequest,
     KillSwitchResponse,
@@ -157,3 +158,34 @@ def get_decisions(
     run_id: str | None = Query(default=None, max_length=64),
 ) -> list[DecisionRecordItem]:
     return state.get_decisions(run_id=run_id)
+
+
+@router.get("/feed/{exchange}/{symbol}", response_model=FeedCandlesResponse)
+def get_feed_candles(
+    exchange: str,
+    symbol: str,
+    state: Annotated[TradingLabState, Depends(get_lab_state)],
+    source: Literal["synthetic", "cache", "delayed_feed"] = Query(default="synthetic"),
+    bars: int = Query(default=30, ge=1, le=250),
+) -> FeedCandlesResponse:
+    ex_clean = exchange.strip().upper()
+    if ex_clean not in {"NSE", "BSE", "NYSE", "NASDAQ"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported exchange '{exchange}'",
+        )
+    sym_clean = symbol.strip().upper()
+    if not sym_clean or len(sym_clean) > 64:
+        raise HTTPException(
+            status_code=400,
+            detail="symbol must be non-empty and at most 64 characters",
+        )
+    try:
+        return state.get_feed_candles(
+            exchange_str=ex_clean,
+            symbol_str=sym_clean,
+            source=source,
+            bars=bars,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

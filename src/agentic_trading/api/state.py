@@ -8,7 +8,11 @@ from pathlib import Path
 from typing import Any
 
 from agentic_trading.agents.data_analyst import DataAnalyst, FundamentalSnapshot
-from agentic_trading.agents.llm_client import DeterministicStubLLMClient
+from agentic_trading.agents.llm_client import (
+    DeterministicStubLLMClient,
+    FailoverLLMClient,
+    LocalOllamaJSONClient,
+)
 from agentic_trading.agents.market_analyst import MarketAnalyst
 from agentic_trading.agents.memory import DecisionLog, HumanLessonsStore
 from agentic_trading.agents.news_analyst import NewsAnalyst, NewsArticle
@@ -24,11 +28,13 @@ from agentic_trading.api.schemas import (
     DecisionRecordItem,
     DeskRunRequest,
     DeskRunResponse,
+    FeedCandlesResponse,
     OrderResponse,
     PortfolioSummaryResponse,
     PositionSummary,
     SubmitOrderRequest,
 )
+from agentic_trading.market_data.feed_bridge import ReadOnlyMarketFeedBridge
 from agentic_trading.market_data.instruments import (
     Currency,
     CurrencyMismatchError,
@@ -114,6 +120,7 @@ class TradingLabState:
         stop_file: Path | str = Path("STOP"),
         db_path: Path | str | None = None,
         lessons_path: Path | str | None = None,
+        fixture_dir: Path | str | None = None,
         initial_inr_deposit: Decimal = Decimal("1000000"),
         initial_usd_deposit: Decimal = Decimal("25000"),
     ) -> None:
@@ -127,6 +134,8 @@ class TradingLabState:
             if lessons_path
             else HumanLessonsStore()
         )
+        self.fixture_dir = Path(fixture_dir) if fixture_dir else Path.cwd() / "data" / "replay_fixtures"
+        self.feed_bridge = ReadOnlyMarketFeedBridge(cache_dir=self.fixture_dir)
 
         deposit_time = datetime(2025, 1, 1, 0, 0, tzinfo=timezone.utc)
         self.inr_portfolio = PortfolioEngine(
@@ -425,32 +434,14 @@ class TradingLabState:
                 random_seed=request.random_seed,
             )
 
-            base_time = datetime(2026, 1, 1, 9, 15, tzinfo=timezone.utc)
-            candles: list[Candle] = []
-            base_price = Decimal("100.00")
-            for i in range(request.bars_count):
-                wave = Decimal(str((i % 20) * 2 - (i % 7)))
-                close_price = base_price + wave
-                high_price = close_price + Decimal("3.00")
-                low_price = max(Decimal("1.00"), close_price - Decimal("2.00"))
-                open_price = max(Decimal("1.00"), close_price - Decimal("1.00"))
-                bar_open_time = base_time + timedelta(days=i)
-                bar_retrieval_time = bar_open_time + timedelta(hours=6, minutes=15)
-                candles.append(
-                    Candle(
-                        symbol=symbol,
-                        exchange=exchange,
-                        interval=CandleInterval.D1,
-                        open=open_price,
-                        high=high_price,
-                        low=low_price,
-                        close=close_price,
-                        volume=100000,
-                        timestamp=bar_open_time,
-                        source="synthetic_backtest",
-                        retrieval_timestamp=bar_retrieval_time,
-                    )
-                )
+            fetch_res = self.feed_bridge.fetch_candles(
+                exchange=exchange,
+                symbol=symbol,
+                interval=CandleInterval.D1,
+                bars_count=request.bars_count,
+                mode=request.feed_source,
+            )
+            candles = list(fetch_res.candles)
 
             strategy = SmaCrossStrategy(fast=5, slow=15)
             result = self.backtest_engine.run(instrument, candles, strategy, config)
@@ -497,6 +488,7 @@ class TradingLabState:
                 monte_carlo=monte_carlo_dict,
                 trade_count=len(result.trades),
                 conservation_residual=residual,
+                feed_source=fetch_res.source,
             )
 
     def run_desk(self, request: DeskRunRequest) -> DeskRunResponse:
@@ -517,15 +509,23 @@ class TradingLabState:
                 self.inr_risk_policy if currency == Currency.INR else self.usd_risk_policy
             )
 
+            if request.llm_backend == "ollama":
+                active_llm = FailoverLLMClient(
+                    LocalOllamaJSONClient(default_model=request.ollama_model),
+                    fallback=self.llm_client,
+                )
+            else:
+                active_llm = self.llm_client
+
             orchestrator = TradingDeskOrchestrator(
                 paper_broker=broker,
                 risk_policy=risk_policy,
                 mandate=self.mandate,
-                market_analyst=MarketAnalyst(self.llm_client),
-                data_analyst=DataAnalyst(self.llm_client),
-                news_analyst=NewsAnalyst(self.llm_client),
+                market_analyst=MarketAnalyst(active_llm),
+                data_analyst=DataAnalyst(active_llm),
+                news_analyst=NewsAnalyst(active_llm),
                 opportunity_scout=OpportunityScout(),
-                strategist=Strategist(self.llm_client),
+                strategist=Strategist(active_llm),
                 decision_log=self.decision_log,
                 lessons_store=self.lessons_store,
             )
@@ -548,25 +548,15 @@ class TradingLabState:
                     tick_size=tick,
                     lot_size=1,
                 )
-                bars: list[Candle] = []
-                for i in range(25):
-                    bar_time = as_of - timedelta(days=24 - i, hours=6, minutes=15)
-                    bar_retrieval = bar_time + timedelta(hours=6, minutes=15)
-                    bars.append(
-                        Candle(
-                            symbol=sym,
-                            exchange=exchange,
-                            interval=CandleInterval.D1,
-                            open=Decimal("150.00"),
-                            high=Decimal("155.00"),
-                            low=Decimal("148.00"),
-                            close=Decimal("152.00"),
-                            volume=50000,
-                            timestamp=bar_time,
-                            source="synthetic_desk",
-                            retrieval_timestamp=bar_retrieval,
-                        )
-                    )
+                fetch_res = self.feed_bridge.fetch_candles(
+                    exchange=exchange,
+                    symbol=sym,
+                    interval=CandleInterval.D1,
+                    bars_count=25,
+                    mode=request.feed_source,
+                    as_of=as_of,
+                )
+                bars = list(fetch_res.candles)
                 context = BarContext(
                     instrument=instrument,
                     decision_time=bars[-1].close_time,
@@ -644,6 +634,40 @@ class TradingLabState:
                 rejected_proposals=rejected_proposals,
                 report_markdown=result.report,
                 reconciled=result.reconciliation.is_reconciled,
+                llm_backend=request.llm_backend,
+                feed_source=request.feed_source,
+            )
+
+    def get_feed_candles(
+        self,
+        exchange_str: str,
+        symbol_str: str,
+        source: str = "synthetic",
+        bars: int = 30,
+    ) -> FeedCandlesResponse:
+        with self._lock:
+            ex = Exchange(exchange_str.strip().upper())
+            sym = symbol_str.strip().upper()
+            curr = "INR" if ex in {Exchange.NSE, Exchange.BSE} else "USD"
+            res = self.feed_bridge.fetch_candles(
+                exchange=ex,
+                symbol=sym,
+                interval=CandleInterval.D1,
+                bars_count=bars,
+                mode=source,
+            )
+            latest = res.candles[-1]
+            return FeedCandlesResponse(
+                paper_only=True,
+                exchange=ex.value,
+                symbol=sym,
+                currency=curr,
+                interval=CandleInterval.D1.value,
+                source=res.source,
+                candle_count=len(res.candles),
+                latest_close=latest.close,
+                latest_timestamp=latest.timestamp,
+                warnings=list(res.warnings),
             )
 
     def get_decisions(self, run_id: str | None = None) -> list[DecisionRecordItem]:

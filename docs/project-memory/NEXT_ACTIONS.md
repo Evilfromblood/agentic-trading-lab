@@ -1,6 +1,6 @@
 # Next Actions
 
-Current priority: Milestone 6 (Local-First FastAPI Backend & Interactive Web Dashboard) is complete and verified. All milestones (M2a, M2b, M2c, M3, M4, M5, M6) are implemented, tested, and verified across Python 3.11 and Python 3.14. Next step is packaging the verification archive and external adversarial review.
+Current priority: Milestone 7 (Read-Only Market Feed Bridge, HMAC Replay Cache & Loopback Ollama Desk Integration) is complete and verified. All milestones (M2a, M2b, M2c, M3, M4, M5, M6, M7) are implemented, tested, and verified across Python 3.11 and Python 3.14. Next step is packaging the verification archive and external adversarial review.
 
 ## Immediate sequence
 1. Baseline M2a committed (`1b7e582`) and pushed to `origin/feature/reliable-foundation`.
@@ -44,7 +44,14 @@ Current priority: Milestone 6 (Local-First FastAPI Backend & Interactive Web Das
    - Clean application lifecycle and localhost-only binding (`127.0.0.1:8000`) in `src/agentic_trading/api/app.py`.
    - Adversarial hardening (ADR-031): DNS-rebinding protection (`Host` header check), cross-origin CSRF mitigation (`Origin`/`Referer` check), defensive CSP and security headers, strict extra fields rejection (`extra="forbid"`), string length and collection size caps, and thread-safe portfolio evaluation.
    - 472 tests passing across the full suite on Python 3.11 and Python 3.14 with 88.17% coverage. Zero inline `#` comments.
-8. Next: Independent external adversarial verification of M6 final package, followed by strategy optimization and live market feed paper integration.
+8. M7 Read-Only Market Feed Bridge, HMAC Replay Cache & Loopback Ollama Desk Integration implemented, hardened, and verified (ADR-032):
+   - SSRF-hardened `ReadOnlyMarketFeedBridge` with HTTPS and Yahoo Finance host allowlisting, 1 MB payload limits, and non-finite constant rejection.
+   - `MarketDataQualityGate` structural and geometric validation (ordering, intervals, high/low envelopes, jump thresholds).
+   - HMAC-SHA256 authenticated `ReplayFixtureStore` supporting `"synthetic"`, `"cache"`, and `"delayed_feed"` modes with failover.
+   - Loopback-isolated `LocalOllamaJSONClient` (`127.0.0.1`, `localhost`, `::1`), model name regex sanitization, 256 KB response limits, and `FailoverLLMClient` transparent delegation.
+   - API endpoints (`GET /api/feed/{exchange}/{symbol}`), schema parameters (`llm_backend`, `ollama_model`, `feed_source`), and dashboard selector controls.
+   - 483 tests passing across the full suite on Python 3.11 and Python 3.14 with 88.34% coverage. Zero inline `#` comments.
+9. Next: Independent external adversarial verification of M7 review bundle, followed by strategy optimization and live market feed paper integration.
 
 ## Review/remediation loop
 Claude independent verification -> ChatGPT triage and scoped technical direction -> Antigravity implementation and regression tests -> independent verification of the new snapshot. Avoid overlapping audits of unchanged code when a focused remediation cycle is more efficient.
