@@ -535,3 +535,28 @@ Append decisions; do not silently rewrite historical decisions. Mark superseded 
   - Python compileall: passed with exit code 0 on both 3.11 and 3.14.
   - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` passed with 0 unbaselined secrets.
   - Zero inline `#` comments verified across all git diff additions.
+
+
+## ADR-034 (Minimalist Dashboard UI & Human-Readable Desk Summary Formatting)
+- **Status:** Accepted (2026-11-23)
+- **Context:** The initial local dashboard featured heavy ASCII dividers, redundant badges, verbose Python object reprs (`Money(...)`), and prominent configuration controls that cluttered the daily monitoring experience.
+- **Decisions:**
+  1. **Human-Readable Money & Scannable Reporting (`src/agentic_trading/agents/reporter.py`):**
+     - Formatted `Money` amounts cleanly as `f"{money.amount:,.2f} {money.currency.value}"` (e.g. `1,000,000.00 INR`, `105.10 INR`).
+     - Replaced heavy `===` ASCII divider walls with clean section headings (`Portfolio Summary`, `Executed Orders`, `Skipped / Rejected`, `Position Reconciliation`).
+     - Maintained backward compatibility with existing tests (`DAILY DESK SUMMARY` header preserved; `format_report = generate_eod_report` alias added).
+  2. **Calm, Minimalist Dark-Slate Dashboard (`src/agentic_trading/api/dashboard.py`):**
+     - Adopted clean system sans-serif typography with generous spacing (`max-width: 1020px`) and muted 1px borders.
+     - Single compact header containing the title, an amber `PAPER TRADING ONLY` status pill, live status dot (`Active`/`Stopped`), and `Emergency Stop` button.
+     - Two portfolio cards (INR and USD) highlighting Total Equity as the primary large figure with key-value rows for Cash, Holdings, Realized P&L, and Positions. Replaced redundant green conservation pills with fail-closed warning banners shown only on discrepancies.
+     - Focused action bar (`Run Desk`, `Run Backtest`) with collapsible inline settings panel for feed source and LLM backend selectors.
+     - Automatic portfolio refresh following desk runs, backtests, or kill switch toggles.
+     - Clean output card showing a concise status line above the execution log rendered strictly via safe DOM manipulation (`textContent` and `createElement`).
+- **Consequences:** Delivers a modern, distraction-free operations cockpit while upholding zero external CDN dependencies, strict XSS protection, and framework independence.
+- **Verification Evidence:**
+  - Full pytest suite: **487 passed in 16.08s** on Python 3.11.9 (`.venv311`) and **487 passed in 14.20s** on Python 3.14.4 (`.venv`).
+  - Genuine pytest-cov coverage: **88.33%** (exceeding mandatory `--cov-fail-under=85`).
+  - Ruff `src`, `tests`, and `v3-zerodha/src`: `All checks passed!`.
+  - Python compileall: passed with exit code 0 on both 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` passed with 0 unbaselined secrets.
+  - Zero inline `#` comments verified across all git diff additions.

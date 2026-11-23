@@ -9,15 +9,23 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <title>Agentic Trading Lab — Dashboard</title>
   <style>
     :root {
-      --bg: #0f172a;
-      --card-bg: #1e293b;
-      --border: #334155;
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
-      --accent: #38bdf8;
+      --bg: #0b0f19;
+      --card-bg: #111827;
+      --border: #1f2937;
+      --text: #f9fafb;
+      --text-muted: #9ca3af;
+      --text-dim: #6b7280;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
       --danger: #ef4444;
-      --success: #22c55e;
-      --warning: #f59e0b;
+      --danger-hover: #dc2626;
+      --danger-bg: rgba(239, 68, 68, 0.12);
+      --danger-border: rgba(239, 68, 68, 0.3);
+      --success: #10b981;
+      --success-bg: rgba(16, 185, 129, 0.12);
+      --amber: #f59e0b;
+      --amber-bg: rgba(245, 158, 11, 0.12);
+      --amber-border: rgba(245, 158, 11, 0.3);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -25,45 +33,113 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       background: var(--bg);
       color: var(--text);
       line-height: 1.5;
-      padding: 20px;
+      padding: 32px 20px;
     }
-    .banner {
-      background: #7f1d1d;
-      color: #fecaca;
-      font-weight: 700;
-      text-align: center;
-      padding: 12px;
-      border-radius: 8px;
-      margin-bottom: 24px;
-      border: 1px solid #b91c1c;
-      letter-spacing: 0.05em;
+    .container {
+      max-width: 1020px;
+      margin: 0 auto;
     }
     header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 24px;
-      padding-bottom: 16px;
+      margin-bottom: 28px;
+      padding-bottom: 20px;
       border-bottom: 1px solid var(--border);
     }
-    h1 { font-size: 1.5rem; }
-    .status-badge {
-      display: inline-block;
+    .header-left h1 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
       padding: 4px 10px;
       border-radius: 9999px;
-      font-size: 0.85rem;
+      font-size: 0.75rem;
       font-weight: 600;
-      background: #14532d;
-      color: #86efac;
+      letter-spacing: 0.04em;
     }
-    .status-badge.stopped {
-      background: #7f1d1d;
+    .pill-amber {
+      background: var(--amber-bg);
+      color: var(--amber);
+      border: 1px solid var(--amber-border);
+    }
+    .status-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.82rem;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--success);
+    }
+    .status-indicator.stopped .status-dot {
+      background: var(--danger);
+    }
+    .status-indicator.stopped {
+      color: var(--danger);
+    }
+    .btn {
+      cursor: pointer;
+      font-weight: 600;
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 0.85rem;
+      border: 1px solid transparent;
+      transition: background-color 0.15s, opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.92; }
+    .btn:active { transform: scale(0.98); }
+    .btn-primary {
+      background: var(--accent);
+      color: #ffffff;
+    }
+    .btn-secondary {
+      background: #1e293b;
+      color: var(--text);
+      border-color: var(--border);
+    }
+    .btn-secondary:hover {
+      background: #334155;
+    }
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-muted);
+      border-color: var(--border);
+    }
+    .btn-ghost:hover {
+      background: #1e293b;
+      color: var(--text);
+    }
+    .btn-danger-outline {
+      background: var(--danger-bg);
       color: #fca5a5;
+      border-color: var(--danger-border);
     }
-    .grid {
+    .btn-danger-outline:hover {
+      background: rgba(239, 68, 68, 0.2);
+    }
+    .btn-success-outline {
+      background: var(--success-bg);
+      color: #86efac;
+      border-color: rgba(16, 185, 129, 0.3);
+    }
+    .portfolio-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      gap: 20px;
+      gap: 16px;
       margin-bottom: 24px;
     }
     .card {
@@ -72,151 +148,222 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       border-radius: 10px;
       padding: 20px;
     }
-    .card-title {
-      font-size: 1.1rem;
-      font-weight: 600;
-      margin-bottom: 16px;
+    .card-head {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      margin-bottom: 8px;
     }
-    .metric {
+    .card-title {
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+    .card-tag {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+    .equity-figure {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 16px;
+      font-variant-numeric: tabular-nums;
+    }
+    .metric-row {
       display: flex;
       justify-content: space-between;
-      padding: 8px 0;
-      border-bottom: 1px solid rgba(255,255,255,0.05);
+      padding: 7px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      font-size: 0.85rem;
     }
-    .metric:last-child { border-bottom: none; }
-    .metric-label { color: var(--text-muted); }
-    .metric-val { font-weight: 600; font-family: monospace; }
-    .residual-tag {
-      display: inline-block;
-      margin-top: 14px;
-      padding: 4px 8px;
-      border-radius: 6px;
-      font-size: 0.8rem;
+    .metric-row:last-child {
+      border-bottom: none;
+    }
+    .metric-name {
+      color: var(--text-muted);
+    }
+    .metric-num {
       font-weight: 600;
-      background: #064e3b;
-      color: #a7f3d0;
-      border: 1px solid #059669;
+      font-variant-numeric: tabular-nums;
     }
-    .btn {
-      cursor: pointer;
-      font-weight: 600;
+    .warning-badge {
+      margin-top: 12px;
+      padding: 6px 10px;
       border-radius: 6px;
-      padding: 10px 16px;
-      border: none;
-      transition: opacity 0.2s;
+      font-size: 0.78rem;
+      font-weight: 600;
+      background: var(--danger-bg);
+      color: #fca5a5;
+      border: 1px solid var(--danger-border);
     }
-    .btn:hover { opacity: 0.9; }
-    .btn:active { transform: scale(0.98); }
-    .btn-danger { background: var(--danger); color: #fff; }
-    .btn-accent { background: var(--accent); color: #0f172a; margin-right: 10px; }
-    .btn-success { background: var(--success); color: #0f172a; }
-    .actions {
+    .action-bar {
       display: flex;
+      flex-direction: column;
       gap: 12px;
-      flex-wrap: wrap;
       margin-bottom: 24px;
     }
-    .output-card {
+    .action-buttons {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .settings-panel {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      padding: 12px 16px;
+      border-radius: 8px;
+    }
+    .setting-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.83rem;
+      color: var(--text-muted);
+    }
+    .setting-group select {
+      background: #0f172a;
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 6px 10px;
+      border-radius: 5px;
+      font-size: 0.83rem;
+    }
+    .output-section {
       background: var(--card-bg);
       border: 1px solid var(--border);
       border-radius: 10px;
-      padding: 20px;
-      min-height: 180px;
+      padding: 18px 20px;
     }
-    .console-pre {
-      background: #090d16;
-      border: 1px solid #1e293b;
+    .output-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .output-title {
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+    .output-meta {
+      font-size: 0.78rem;
+      color: var(--accent);
+      font-family: monospace;
+    }
+    .output-pre {
+      background: #080d1a;
+      border: 1px solid #172033;
       padding: 14px;
       border-radius: 6px;
-      font-family: monospace;
-      font-size: 0.85rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.82rem;
       color: #cbd5e1;
       overflow-x: auto;
       white-space: pre-wrap;
-      max-height: 400px;
+      max-height: 480px;
       overflow-y: auto;
+      line-height: 1.6;
     }
   </style>
 </head>
 <body>
-  <div class="banner">
-    ⚠️ PAPER TRADING ONLY — ALL SIMULATED EXECUTION — ZERO REAL-MONEY BROKER ROUTING ⚠️
-  </div>
-
-  <header>
-    <div>
-      <h1>Agentic Trading Lab</h1>
-      <p style="color: var(--text-muted); font-size: 0.9rem;">Milestone 6: Local-First Research Desk & Time Machine</p>
-    </div>
-    <div style="display: flex; align-items: center; gap: 14px;">
-      <span id="killStatusBadge" class="status-badge">DESK RUNNING</span>
-      <button id="toggleKillBtn" class="btn btn-danger">EMERGENCY STOP</button>
-    </div>
-  </header>
-
-  <div class="grid">
-    <div class="card" id="inrCard">
-      <div class="card-title">
-        <span>INR Portfolio</span>
-        <span style="font-size: 0.8rem; color: var(--accent);">NSE / BSE</span>
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <h1>Agentic Trading Lab</h1>
       </div>
-      <div class="metric"><span class="metric-label">Cash</span><span class="metric-val" id="inrCash">—</span></div>
-      <div class="metric"><span class="metric-label">Holdings</span><span class="metric-val" id="inrHoldings">—</span></div>
-      <div class="metric"><span class="metric-label">Total Equity</span><span class="metric-val" id="inrEquity">—</span></div>
-      <div class="metric"><span class="metric-label">Realized P&amp;L</span><span class="metric-val" id="inrRealized">—</span></div>
-      <div class="metric"><span class="metric-label">Open Positions</span><span class="metric-val" id="inrPosCount">—</span></div>
-      <div><span class="residual-tag" id="inrResidual">Conservation Residual: 0.000000000000</span></div>
-    </div>
-
-    <div class="card" id="usdCard">
-      <div class="card-title">
-        <span>USD Portfolio</span>
-        <span style="font-size: 0.8rem; color: var(--accent);">NYSE / NASDAQ</span>
+      <div class="header-right">
+        <span class="pill pill-amber">PAPER TRADING ONLY</span>
+        <span id="killStatusIndicator" class="status-indicator">
+          <span class="status-dot"></span>
+          <span id="killStatusText">Active</span>
+        </span>
+        <button id="toggleKillBtn" class="btn btn-danger-outline">Emergency Stop</button>
       </div>
-      <div class="metric"><span class="metric-label">Cash</span><span class="metric-val" id="usdCash">—</span></div>
-      <div class="metric"><span class="metric-label">Holdings</span><span class="metric-val" id="usdHoldings">—</span></div>
-      <div class="metric"><span class="metric-label">Total Equity</span><span class="metric-val" id="usdEquity">—</span></div>
-      <div class="metric"><span class="metric-label">Realized P&amp;L</span><span class="metric-val" id="usdRealized">—</span></div>
-      <div class="metric"><span class="metric-label">Open Positions</span><span class="metric-val" id="usdPosCount">—</span></div>
-      <div><span class="residual-tag" id="usdResidual">Conservation Residual: 0.000000000000</span></div>
-    </div>
-  </div>
+    </header>
 
-  <div class="actions">
-    <div style="display: flex; align-items: center; gap: 8px;">
-      <label for="feedSourceSelect" style="color: var(--text-muted); font-size: 0.9rem;">Feed Source:</label>
-      <select id="feedSourceSelect" style="background: var(--card-bg); color: var(--text); border: 1px solid var(--border); padding: 8px 12px; border-radius: 6px;">
-        <option value="synthetic">Synthetic (Deterministic)</option>
-        <option value="cache">Replay Fixture Cache</option>
-        <option value="delayed_feed">Delayed Public Feed</option>
-      </select>
-    </div>
-    <div style="display: flex; align-items: center; gap: 8px;">
-      <label for="llmBackendSelect" style="color: var(--text-muted); font-size: 0.9rem;">LLM Backend:</label>
-      <select id="llmBackendSelect" style="background: var(--card-bg); color: var(--text); border: 1px solid var(--border); padding: 8px 12px; border-radius: 6px;">
-        <option value="stub">Deterministic Stub</option>
-        <option value="ollama">Local Ollama (gemma4:12b)</option>
-      </select>
-    </div>
-    <button id="runDeskBtn" class="btn btn-accent">Run 7-Agent Desk Cycle (RELIANCE/TCS)</button>
-    <button id="runBacktestBtn" class="btn btn-success">Run Time Machine Backtest (100 Bars)</button>
-    <button id="refreshBtn" class="btn" style="background: #334155; color: #fff;">Refresh Portfolios</button>
-  </div>
+    <div class="portfolio-grid">
+      <div class="card" id="inrCard">
+        <div class="card-head">
+          <span class="card-title">INR Portfolio</span>
+          <span class="card-tag">NSE / BSE</span>
+        </div>
+        <div class="equity-figure" id="inrEquity">—</div>
+        <div class="metric-row"><span class="metric-name">Cash</span><span class="metric-num" id="inrCash">—</span></div>
+        <div class="metric-row"><span class="metric-name">Holdings</span><span class="metric-num" id="inrHoldings">—</span></div>
+        <div class="metric-row"><span class="metric-name">Realized P&amp;L</span><span class="metric-num" id="inrRealized">—</span></div>
+        <div class="metric-row"><span class="metric-name">Open Positions</span><span class="metric-num" id="inrPosCount">—</span></div>
+        <div id="inrWarning" class="warning-badge" style="display: none;"></div>
+      </div>
 
-  <div class="output-card">
-    <div class="card-title">Execution Log / Desk Output</div>
-    <div id="outputContainer" class="console-pre">Ready. Click an action above to start a cycle.</div>
+      <div class="card" id="usdCard">
+        <div class="card-head">
+          <span class="card-title">USD Portfolio</span>
+          <span class="card-tag">NYSE / NASDAQ</span>
+        </div>
+        <div class="equity-figure" id="usdEquity">—</div>
+        <div class="metric-row"><span class="metric-name">Cash</span><span class="metric-num" id="usdCash">—</span></div>
+        <div class="metric-row"><span class="metric-name">Holdings</span><span class="metric-num" id="usdHoldings">—</span></div>
+        <div class="metric-row"><span class="metric-name">Realized P&amp;L</span><span class="metric-num" id="usdRealized">—</span></div>
+        <div class="metric-row"><span class="metric-name">Open Positions</span><span class="metric-num" id="usdPosCount">—</span></div>
+        <div id="usdWarning" class="warning-badge" style="display: none;"></div>
+      </div>
+    </div>
+
+    <div class="action-bar">
+      <div class="action-buttons">
+        <button id="runDeskBtn" class="btn btn-primary">Run Desk</button>
+        <button id="runBacktestBtn" class="btn btn-secondary">Run Backtest</button>
+        <button id="toggleSettingsBtn" class="btn btn-ghost">Settings ▾</button>
+      </div>
+      <div id="settingsPanel" class="settings-panel" style="display: none;">
+        <div class="setting-group">
+          <label for="feedSourceSelect">Feed Source:</label>
+          <select id="feedSourceSelect">
+            <option value="cache">Replay Fixture Cache</option>
+            <option value="delayed_feed">Delayed Public Feed</option>
+            <option value="synthetic" selected>Synthetic (Deterministic)</option>
+          </select>
+        </div>
+        <div class="setting-group">
+          <label for="llmBackendSelect">LLM Backend:</label>
+          <select id="llmBackendSelect">
+            <option value="stub" selected>Deterministic Stub</option>
+            <option value="ollama">Local Ollama (gemma4:12b)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="output-section">
+      <div class="output-header">
+        <span class="output-title">Desk Output</span>
+        <span id="outputMeta" class="output-meta">Idle</span>
+      </div>
+      <pre id="outputContainer" class="output-pre">Ready. Click an action above to start a cycle.</pre>
+    </div>
   </div>
 
   <script>
     let killSwitchActive = false;
 
-    function renderOutput(text) {
+    function formatMoney(amountStr, currency) {
+      const num = parseFloat(amountStr);
+      if (isNaN(num)) return amountStr + " " + currency;
+      return num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " " + currency;
+    }
+
+    function setOutput(statusLine, contentText) {
+      const meta = document.getElementById("outputMeta");
+      meta.textContent = statusLine;
       const container = document.getElementById("outputContainer");
-      container.textContent = text;
+      container.textContent = contentText;
     }
 
     async function fetchHealth() {
@@ -225,21 +372,22 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         if (!res.ok) return;
         const data = await res.json();
         killSwitchActive = Boolean(data.kill_switch_active);
-        const badge = document.getElementById("killStatusBadge");
+        const indicator = document.getElementById("killStatusIndicator");
+        const statusText = document.getElementById("killStatusText");
         const btn = document.getElementById("toggleKillBtn");
         if (killSwitchActive) {
-          badge.textContent = "STOPPED (KILL SWITCH ACTIVE)";
-          badge.className = "status-badge stopped";
-          btn.textContent = "CLEAR KILL SWITCH";
-          btn.className = "btn btn-success";
+          indicator.className = "status-indicator stopped";
+          statusText.textContent = "Stopped";
+          btn.textContent = "Resume Trading";
+          btn.className = "btn btn-success-outline";
         } else {
-          badge.textContent = "DESK RUNNING";
-          badge.className = "status-badge";
-          btn.textContent = "EMERGENCY STOP";
-          btn.className = "btn btn-danger";
+          indicator.className = "status-indicator";
+          statusText.textContent = "Active";
+          btn.textContent = "Emergency Stop";
+          btn.className = "btn btn-danger-outline";
         }
       } catch (err) {
-        renderOutput("Health check error: " + err);
+        setOutput("Error", "Health check error: " + err);
       }
     }
 
@@ -253,13 +401,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         });
         if (res.ok) {
           await fetchHealth();
-          renderOutput("Kill switch toggled: active=" + nextState);
+          await refreshAll();
+          setOutput(nextState ? "Stopped" : "Active", "Kill switch toggled: active=" + nextState);
         } else {
           const errData = await res.json();
-          renderOutput("Kill switch toggle failed: " + (errData.detail || res.statusText));
+          setOutput("Error", "Kill switch toggle failed: " + (errData.detail || res.statusText));
         }
       } catch (err) {
-        renderOutput("Kill switch request failed: " + err);
+        setOutput("Error", "Kill switch request failed: " + err);
       }
     }
 
@@ -269,14 +418,23 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         if (!res.ok) return;
         const data = await res.json();
         const prefix = curr.toLowerCase();
-        document.getElementById(prefix + "Cash").textContent = data.cash + " " + curr;
-        document.getElementById(prefix + "Holdings").textContent = data.holdings_value + " " + curr;
-        document.getElementById(prefix + "Equity").textContent = data.total_equity + " " + curr;
-        document.getElementById(prefix + "Realized").textContent = data.realized_pnl + " " + curr;
-        document.getElementById(prefix + "PosCount").textContent = data.positions.length;
-        document.getElementById(prefix + "Residual").textContent = "Conservation Residual: " + data.conservation_residual;
+        document.getElementById(prefix + "Equity").textContent = formatMoney(data.total_equity, curr);
+        document.getElementById(prefix + "Cash").textContent = formatMoney(data.cash, curr);
+        document.getElementById(prefix + "Holdings").textContent = formatMoney(data.holdings_value, curr);
+        document.getElementById(prefix + "Realized").textContent = formatMoney(data.realized_pnl, curr);
+        document.getElementById(prefix + "PosCount").textContent = String(data.positions.length);
+
+        const warnEl = document.getElementById(prefix + "Warning");
+        while (warnEl.firstChild) warnEl.removeChild(warnEl.firstChild);
+        if (!data.reconciled || data.conservation_residual !== "0") {
+          const warnText = document.createTextNode("Reconciliation Warning: residual " + data.conservation_residual);
+          warnEl.appendChild(warnText);
+          warnEl.style.display = "block";
+        } else {
+          warnEl.style.display = "none";
+        }
       } catch (err) {
-        renderOutput("Failed to load portfolio " + curr + ": " + err);
+        setOutput("Error", "Failed to load portfolio " + curr + ": " + err);
       }
     }
 
@@ -286,10 +444,22 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       await loadPortfolio("USD");
     }
 
+    function toggleSettings() {
+      const panel = document.getElementById("settingsPanel");
+      const btn = document.getElementById("toggleSettingsBtn");
+      if (panel.style.display === "none") {
+        panel.style.display = "flex";
+        btn.textContent = "Settings ▴";
+      } else {
+        panel.style.display = "none";
+        btn.textContent = "Settings ▾";
+      }
+    }
+
     async function runDeskCycle() {
       const feedSource = document.getElementById("feedSourceSelect").value;
       const llmBackend = document.getElementById("llmBackendSelect").value;
-      renderOutput("Initiating 7-Agent Research Desk cycle (Feed: " + feedSource + ", LLM: " + llmBackend + ")...");
+      setOutput("Running...", "Initiating 7-Agent Research Desk cycle (Feed: " + feedSource + ", LLM: " + llmBackend + ")...");
       try {
         const res = await fetch("/api/desk/run", {
           method: "POST",
@@ -305,20 +475,20 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         });
         if (!res.ok) {
           const err = await res.json();
-          renderOutput("Desk run rejected: " + (err.detail || res.statusText));
+          setOutput("Rejected", "Desk run rejected: " + (err.detail || res.statusText));
           return;
         }
         const data = await res.json();
-        renderOutput(data.report_markdown);
+        setOutput("Completed · " + feedSource + " · " + llmBackend, data.report_markdown);
         await refreshAll();
       } catch (err) {
-        renderOutput("Desk run error: " + err);
+        setOutput("Error", "Desk run error: " + err);
       }
     }
 
     async function runBacktest() {
       const feedSource = document.getElementById("feedSourceSelect").value;
-      renderOutput("Executing Time Machine backtest (Feed: " + feedSource + ", RELIANCE, NSE)...");
+      setOutput("Running...", "Executing Time Machine backtest (Feed: " + feedSource + ", RELIANCE, NSE)...");
       try {
         const res = await fetch("/api/backtest", {
           method: "POST",
@@ -336,14 +506,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         });
         if (!res.ok) {
           const err = await res.json();
-          renderOutput("Backtest failed: " + (err.detail || res.statusText));
+          setOutput("Failed", "Backtest failed: " + (err.detail || res.statusText));
           return;
         }
         const data = await res.json();
         const lines = [
-          "============================================================",
           "TIME MACHINE BACKTEST COMPLETED",
-          "============================================================",
           "Manifest ID:          " + data.manifest_id,
           "Manifest SHA-256:     " + data.manifest_sha256,
           "Manifest Verified:    " + data.manifest_verified,
@@ -351,7 +519,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           "Completed Trades:     " + data.trade_count,
           "Conservation Resid:   " + data.conservation_residual,
           "",
-          "PERFORMANCE METRICS:",
+          "Performance Metrics:",
           "  Total Trades:       " + data.metrics.total_trades,
           "  Winning Trades:     " + data.metrics.winning_trades,
           "  Win Rate:           " + data.metrics.win_rate_pct + "%",
@@ -359,23 +527,23 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           "  Max Drawdown:       " + data.metrics.max_drawdown_pct + "%",
           "  Sharpe Ratio:       " + data.metrics.sharpe_ratio,
           "",
-          "SEEDED MONTE CARLO (500 Runs):",
+          "Seeded Monte Carlo (500 Runs):",
           "  Return p50:         " + data.monte_carlo.return_pct_p50 + "%",
           "  Return p05 / p95:   " + data.monte_carlo.return_pct_p05 + "% / " + data.monte_carlo.return_pct_p95 + "%",
           "  Max Drawdown p95:   " + data.monte_carlo.max_drawdown_pct_p95 + "%",
-          "  Probability of Loss:" + data.monte_carlo.probability_of_loss_pct + "%",
-          "============================================================"
+          "  Probability of Loss:" + data.monte_carlo.probability_of_loss_pct + "%"
         ];
-        renderOutput(lines.join("\\n"));
+        setOutput("Completed · " + data.feed_source + " · Time Machine", lines.join("\\n"));
+        await refreshAll();
       } catch (err) {
-        renderOutput("Backtest error: " + err);
+        setOutput("Error", "Backtest error: " + err);
       }
     }
 
     document.getElementById("toggleKillBtn").addEventListener("click", toggleKillSwitch);
     document.getElementById("runDeskBtn").addEventListener("click", runDeskCycle);
     document.getElementById("runBacktestBtn").addEventListener("click", runBacktest);
-    document.getElementById("refreshBtn").addEventListener("click", refreshAll);
+    document.getElementById("toggleSettingsBtn").addEventListener("click", toggleSettings);
 
     refreshAll();
   </script>

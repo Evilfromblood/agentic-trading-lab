@@ -2,6 +2,27 @@
 
 Append concise entries in reverse chronological order. Record verified outcomes, not intentions.
 
+## 2026-11-23 — Dashboard UI Simplification & Human-Readable Desk Output Formatting (ADR-034)
+- Redesigned local dashboard and formatted daily reporter summaries for enhanced readability, scannability, and operational focus:
+  - **Human-Readable Money & Clean Report Headings (`src/agentic_trading/agents/reporter.py`)**:
+    - Formatted `Money` amounts cleanly as `f"{money.amount:,.2f} {money.currency.value}"` (e.g. `1,000,000.00 INR`, `105.10 INR`), eliminating raw Python `Money(...)` reprs.
+    - Replaced heavy `===` ASCII divider walls with clean section headings (`Portfolio Summary`, `Executed Orders`, `Skipped / Rejected`, `Position Reconciliation`).
+    - Added `format_report = generate_eod_report` alias and preserved `DAILY DESK SUMMARY` header for 100% test compatibility.
+  - **Minimalist Dark-Slate Dashboard (`src/agentic_trading/api/dashboard.py`)**:
+    - Adopted a clean dark-slate layout (`max-width: 1020px`) with system sans-serif typography and muted borders.
+    - Replaced full-width top banner with a single compact header featuring an amber `PAPER TRADING ONLY` status pill, live status indicator (`Active`/`Stopped`), and `Emergency Stop` button.
+    - Highlighted Total Equity as the primary large figure on INR and USD portfolio cards, with compact key-value rows below and fail-closed warning banners displayed only on reconciliation discrepancies.
+    - Streamlined action bar with primary `Run Desk` and `Run Backtest` buttons, plus a collapsible `Settings ▾` row for feed source and LLM backend selectors.
+    - Automated portfolio refresh following desk runs, backtests, and emergency stop actions.
+    - Rendered output safely via `textContent` and `createElement` with a concise status line (e.g., `Completed · cache · ollama`).
+- **Validation results**:
+  - Full pytest suite: **487 passed in 16.08s** on Python 3.11.9 (`.venv311`) and **487 passed in 14.20s** on Python 3.14.4 (`.venv`).
+  - Genuine pytest-cov coverage: **88.33%** (exceeding mandatory `--cov-fail-under=85`).
+  - Ruff `src`, `tests`, and `v3-zerodha/src`: `All checks passed!`.
+  - Python compileall: passed with exit code 0 on both 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` passed with 0 unbaselined secrets.
+  - Zero inline `#` comments verified across all git diff additions.
+
 ## 2026-11-23 — Milestone 7 Adversarial Hardening: No-Redirect SSRF Opener, Symbol Path-Traversal Guard & Concurrent Cache Safety (ADR-033)
 - Hardened Milestone 7 market data feed bridge, local Ollama LLM client, and API feed routes against SSRF bouncing, path traversal, race conditions, and LLM output anomalies:
   - **No-Redirect HTTP Transport (`src/agentic_trading/market_data/feed_bridge.py`, `src/agentic_trading/agents/llm_client.py`)**:

@@ -1,6 +1,6 @@
 # Milestone 7 Verified & Multi-Milestone Full Verification Audit Brief
 
-**Status:** M2a, M2b, M2c, M3, M4, M5, M6, and M7 verified and hardened (ADR-028, ADR-029, ADR-030, ADR-031, ADR-032, ADR-033).
+**Status:** M2a, M2b, M2c, M3, M4, M5, M6, and M7 verified and hardened (ADR-028, ADR-029, ADR-030, ADR-031, ADR-032, ADR-033, ADR-034).
 **Baseline Commit:** `1b7e5829474239495163da1d2d3349eb35ca9744`  
 **Active Branch:** `feature/reliable-foundation`  
 **Audit Bundle:** `full-project-m7-final-bundle.zip`
@@ -9,9 +9,9 @@
 
 ## 1. Executive Summary
 
-Milestone 7 (Read-Only Market Feed Bridge, HMAC Replay Cache & Loopback Ollama Desk Integration) has been implemented and hardened against adversarial vectors (ADR-032, ADR-033: no-redirect SSRF opener, symbol path traversal guards, concurrent cache thread safety, markdown fence stripping, and non-finite constant rejection) alongside all prior milestones (M2a, M2b, M2c, M3, M4, M5, M6).
+Milestone 7 (Read-Only Market Feed Bridge, HMAC Replay Cache, Loopback Ollama Desk Integration, and Minimalist Dashboard UI) has been implemented and hardened against adversarial vectors (ADR-032, ADR-033, ADR-034: no-redirect SSRF opener, symbol path traversal guards, concurrent cache thread safety, markdown fence stripping, non-finite constant rejection, and minimalist dark-slate UI with human-readable reporting) alongside all prior milestones (M2a, M2b, M2c, M3, M4, M5, M6).
 
-All 487 tests pass across the entire test suite on both genuine Python 3.11.9 (`.venv311`) and Python 3.14.4 (`.venv`). Measured test coverage is **88.36%** (strictly enforcing `--cov-fail-under=85`). Ruff linting, compileall byte-compilation on both Python versions, and blocking secret scanning (`detect-secrets-hook --baseline .secrets.baseline` version 1.5.0 scanning `requirements.lock`) pass with zero errors and zero unbaselined secrets. All new and existing source files and tests enforce zero inline `#` comments via automated tokenizer tests.
+All 487 tests pass across the entire test suite on both genuine Python 3.11.9 (`.venv311`) and Python 3.14.4 (`.venv`). Measured test coverage is **88.33%** (strictly enforcing `--cov-fail-under=85`). Ruff linting, compileall byte-compilation on both Python versions, and blocking secret scanning (`detect-secrets-hook --baseline .secrets.baseline` version 1.5.0 scanning `requirements.lock`) pass with zero errors and zero unbaselined secrets. All new and existing source files and tests enforce zero inline `#` comments via automated tokenizer tests.
 
 ---
 
@@ -129,7 +129,6 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 - **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
 - **Secrets:** 0 leaks detected against `.secrets.baseline` (scanning `requirements.lock`).
 - **Inline `#` Comments:** 0 comments in git diff.
-
 ---
 
 ## 7. Milestone 5 — Paper Trading Engine & 7-Agent AI Research Desk (ADR-028 & ADR-029 Hardened), Verified 2026-11-23
@@ -160,7 +159,6 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 - **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
 - **Secrets:** 0 leaks detected against `.secrets.baseline` (scanning `requirements.lock`).
 - **Inline `#` Comments:** 0 comments in git diff.
-
 ---
 
 ## 8. Milestone 6 — Local-First FastAPI Backend & Interactive Web Dashboard (ADR-030 & ADR-031 Hardened), Verified 2026-11-23
@@ -183,7 +181,6 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 - **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
 - **Secrets:** 0 leaks detected against `.secrets.baseline`.
 - **Inline `#` Comments:** 0 comments in git diff.
-
 ---
 
 ## 9. Milestone 7 — Read-Only Market Feed Bridge, HMAC Replay Cache & Loopback Ollama Desk Integration (ADR-032 & ADR-033 Hardened), Verified 2026-11-23
@@ -211,6 +208,29 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 ### Suite Verification:
 - **Pytest:** 487 passed in 22.56s on Python 3.11 (`.venv311`), 487 passed in 16.70s on Python 3.14 (`.venv`).
 - **Coverage:** **88.36%** (exceeds mandatory `--cov-fail-under=85`).
+- **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
+- **Secrets:** 0 leaks detected against `.secrets.baseline`.
+- **Inline `#` Comments:** 0 comments in git diff.
+---
+
+## 10. Dashboard UI Simplification & Human-Readable Desk Summary Formatting (ADR-034), Verified 2026-11-23
+
+**Files:**
+- `src/agentic_trading/agents/reporter.py`
+- `src/agentic_trading/api/dashboard.py`
+
+| Area | Component | Behaviour & Hardening | Verification Test |
+|---|---|---|---|
+| Reporter | Human-Readable Money | `_format_value` formats `Money` as `f"{money.amount:,.2f} {money.currency.value}"` (e.g., `1,000,000.00 INR`), eliminating raw Python reprs. Added `format_report = generate_eod_report` alias. | `tests/test_m5_paper_and_agents.py::test_reporter_eod_summary_generation_and_formatting`, `tests/test_m6_api_and_dashboard.py::test_desk_run_and_reporting_lifecycle` |
+| Reporter | Clean Headings | Replaced heavy `===` ASCII divider walls with clean section headings (`Portfolio Summary`, `Executed Orders`, `Skipped / Rejected`, `Position Reconciliation`) while preserving exact `DAILY DESK SUMMARY` header. | `tests/test_m5_paper_and_agents.py::test_reporter_eod_summary_generation_and_formatting` |
+| Dashboard | Minimalist Layout | Dark-slate theme (`max-width: 1020px`) with system sans-serif typography, compact header, and muted borders. | `tests/test_m6_api_and_dashboard.py::test_dashboard_renders_and_has_no_external_cdn_links` |
+| Dashboard | Header & Safety | Amber `PAPER TRADING ONLY` badge, live active/stopped status indicator, and emergency stop kill switch button in a unified compact header. | `tests/test_m6_api_and_dashboard.py::test_dashboard_renders_and_has_no_external_cdn_links` |
+| Dashboard | Portfolio Cards | Primary large Total Equity display on INR and USD cards, compact key-value metrics, automated portfolio refresh after desk runs/backtests, and fail-closed discrepancy warnings. | `tests/test_m6_api_and_dashboard.py::test_dashboard_renders_and_has_no_external_cdn_links` |
+| Dashboard | Settings & Output | Collapsible `Settings ▾` toggle for feed source and LLM backend selectors, safe DOM manipulation via `textContent`/`createElement`, zero external CDN scripts or stylesheet links. | `tests/test_m6_api_and_dashboard.py::test_dashboard_renders_and_has_no_external_cdn_links`, `tests/test_m7_feeds_and_ollama.py::test_no_inline_comments_in_m7_code` |
+
+### Suite Verification:
+- **Pytest:** 487 passed in 13.12s on Python 3.11 (`.venv311`), 487 passed in 14.20s on Python 3.14 (`.venv`).
+- **Coverage:** **88.33%** (exceeds mandatory `--cov-fail-under=85`).
 - **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
 - **Secrets:** 0 leaks detected against `.secrets.baseline`.
 - **Inline `#` Comments:** 0 comments in git diff.
