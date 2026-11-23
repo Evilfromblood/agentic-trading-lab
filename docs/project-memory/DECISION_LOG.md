@@ -504,3 +504,34 @@ Append decisions; do not silently rewrite historical decisions. Mark superseded 
   - Python compileall: passed with exit code 0 on both Python 3.11 and 3.14.
   - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files.
   - Zero inline `#` comments verified across all new and edited files.
+
+
+## ADR-033 (Milestone 7 Adversarial Hardening: No-Redirect SSRF Opener, Symbol Path-Traversal Guard & Concurrent Cache Safety)
+- **Status:** Accepted (2026-11-23)
+- **Context:** Following the initial Milestone 7 implementation, an adversarial review identified security and concurrency risks: HTTP 3xx redirect bouncing on allowlisted hosts, symbol path traversal escaping fixture directories in replay caches, race conditions during concurrent fixture file writes, and unstripped markdown fences or NaN/Infinity constants in local Ollama responses causing parsing anomalies.
+- **Decisions:**
+  1. **Disable HTTP Redirects in Default Transport (`src/agentic_trading/market_data/feed_bridge.py`, `src/agentic_trading/agents/llm_client.py`):**
+     - Subclassed `urllib.request.HTTPRedirectHandler` as `_NoRedirectHandler` raising `urllib.error.URLError("HTTP redirects are forbidden")` on `redirect_request`.
+     - Built custom urllib openers (`urllib.request.build_opener(_NoRedirectHandler())`) in both `ReadOnlyMarketFeedBridge` and `LocalOllamaJSONClient` so allowlisted hosts or loopback proxies cannot redirect requests to internal network endpoints or non-allowlisted targets.
+  2. **Strict Symbol Sanitization & Directory Traversal Defense (`src/agentic_trading/market_data/feed_bridge.py`, `src/agentic_trading/api/routes.py`):**
+     - Enforced strict regex validation `^[A-Za-z0-9._-]{1,32}$` and explicitly blocked `".."`, `/`, `\`, null bytes, and whitespace via `_validate_symbol` and `validate_symbol`.
+     - Rejects path-traversal attempts with `ValueError` in `ReadOnlyMarketFeedBridge` and `ReplayFixtureStore`, and HTTP 400 in `GET /api/feed/{exchange}/{symbol}`.
+  3. **Concurrent Cache Synchronization (`src/agentic_trading/market_data/feed_bridge.py`):**
+     - Guarded `ReplayFixtureStore` read and write operations with `threading.RLock()` across `save_candles`, `load_candles`, and `fetch_candles` so multi-threaded calls never race or corrupt fixture files.
+  4. **Markdown Fence Stripping & Strict Non-Finite Constant Rejection (`src/agentic_trading/agents/llm_client.py`):**
+     - Added `_extract_json_text` in `LocalOllamaJSONClient` to cleanly strip ```` ```json ... ``` ```` and ```` ``` ... ``` ```` fences before JSON parsing.
+     - Enforced `parse_constant=_reject_constant` on both the outer Ollama envelope and inner response text (as well as `FailoverLLMClient`), failing closed on `NaN` or `Infinity` constants with `ValueError` and triggering graceful delegation to offline stubs.
+  5. **Adversarial Regression Tests (`tests/test_m7_feeds_and_ollama.py`):**
+     - Expanded test suite to 15 tests, adding:
+       - `test_feed_bridge_and_ollama_client_reject_http_redirects`
+       - `test_path_traversal_symbol_rejection_in_feed_bridge_and_route`
+       - `test_concurrent_feed_bridge_cache_access_thread_safety`
+       - `test_ollama_markdown_fences_and_non_finite_rejection_with_failover`
+- **Consequences:** Eliminates HTTP redirect SSRF attack vectors, closes file traversal vulnerabilities in fixture caching, protects against concurrent thread corruption, and gracefully handles common LLM formatting edge cases.
+- **Verification Evidence:**
+  - Full pytest suite: **487 passed in 22.56s** on Python 3.11.9 (`.venv311`) and **487 passed in 16.70s** on Python 3.14.4 (`.venv`).
+  - Genuine pytest-cov coverage: **88.36%** (exceeding mandatory `--cov-fail-under=85`).
+  - Ruff `src`, `tests`, and `v3-zerodha/src`: `All checks passed!`.
+  - Python compileall: passed with exit code 0 on both 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` passed with 0 unbaselined secrets.
+  - Zero inline `#` comments verified across all git diff additions.

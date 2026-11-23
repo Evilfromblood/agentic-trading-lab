@@ -330,7 +330,7 @@ class FeedCandlesResponse(BaseModel):
 
     paper_only: Literal[True] = True
     exchange: str = Field(..., max_length=64)
-    symbol: str = Field(..., max_length=64)
+    symbol: str = Field(..., max_length=32)
     currency: str = Field(..., max_length=64)
     interval: str = Field(..., max_length=64)
     source: str = Field(..., max_length=64)

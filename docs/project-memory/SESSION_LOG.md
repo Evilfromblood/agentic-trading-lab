@@ -2,6 +2,33 @@
 
 Append concise entries in reverse chronological order. Record verified outcomes, not intentions.
 
+## 2026-11-23 — Milestone 7 Adversarial Hardening: No-Redirect SSRF Opener, Symbol Path-Traversal Guard & Concurrent Cache Safety (ADR-033)
+- Hardened Milestone 7 market data feed bridge, local Ollama LLM client, and API feed routes against SSRF bouncing, path traversal, race conditions, and LLM output anomalies:
+  - **No-Redirect HTTP Transport (`src/agentic_trading/market_data/feed_bridge.py`, `src/agentic_trading/agents/llm_client.py`)**:
+    - Created `_NoRedirectHandler(urllib.request.HTTPRedirectHandler)` raising `urllib.error.URLError("HTTP redirects are forbidden")` on `redirect_request`.
+    - Integrated `urllib.request.build_opener(_NoRedirectHandler())` into default transports for both `ReadOnlyMarketFeedBridge` and `LocalOllamaJSONClient`.
+  - **Strict Symbol Sanitization & Directory Traversal Defense (`src/agentic_trading/market_data/feed_bridge.py`, `src/agentic_trading/api/routes.py`, `src/agentic_trading/api/schemas.py`)**:
+    - Validated all symbols against `^[A-Za-z0-9._-]{1,32}$` and explicitly blocked `".."`, `/`, `\`, null bytes, and whitespace via `_validate_symbol` and `validate_symbol`.
+    - Path-traversal attempts raise `ValueError` in `ReadOnlyMarketFeedBridge` and `ReplayFixtureStore`, and return HTTP 400 in `GET /api/feed/{exchange}/{symbol}`.
+  - **Concurrent Cache Synchronization (`src/agentic_trading/market_data/feed_bridge.py`)**:
+    - Protected `ReplayFixtureStore` and `ReadOnlyMarketFeedBridge` cache operations with `threading.RLock()` across `save_candles`, `load_candles`, and `fetch_candles`, preventing race conditions during concurrent requests.
+  - **Markdown Fence Stripping & Non-Finite Constant Rejection (`src/agentic_trading/agents/llm_client.py`)**:
+    - Implemented `_extract_json_text` in `LocalOllamaJSONClient` cleanly stripping ```` ```json ... ``` ```` and ```` ``` ... ``` ```` fences.
+    - Enforced `parse_constant=_reject_constant` on outer Ollama envelope, inner response text, and `FailoverLLMClient`, failing closed on `NaN` or `Infinity` constants with `ValueError` and triggering seamless fallback to deterministic offline stubs.
+  - **Adversarial Regression Tests (`tests/test_m7_feeds_and_ollama.py`)**:
+    - Added 4 new adversarial tests (15 total):
+      - `test_feed_bridge_and_ollama_client_reject_http_redirects`
+      - `test_path_traversal_symbol_rejection_in_feed_bridge_and_route`
+      - `test_concurrent_feed_bridge_cache_access_thread_safety`
+      - `test_ollama_markdown_fences_and_non_finite_rejection_with_failover`
+- **Validation results**:
+  - Full pytest suite: **487 passed in 22.56s** on Python 3.11.9 (`.venv311`) and **487 passed in 16.70s** on Python 3.14.4 (`.venv`).
+  - Genuine pytest-cov coverage: **88.36%** (exceeding mandatory `--cov-fail-under=85`).
+  - Ruff `src`, `tests`, and `v3-zerodha/src`: `All checks passed!`.
+  - Python compileall: passed with exit code 0 on both 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files.
+  - Zero inline `#` comments verified across all git diff additions.
+
 ## 2026-11-23 — Milestone 7 Implementation: Read-Only Market Feed Bridge, HMAC Replay Cache & Loopback Ollama Desk Integration (ADR-032)
 - Implemented and verified complete Milestone 7 architecture across market data feed bridge, local Ollama LLM client, and API/dashboard integration:
   - **SSRF-Hardened Feed Bridge (`src/agentic_trading/market_data/feed_bridge.py`)**:

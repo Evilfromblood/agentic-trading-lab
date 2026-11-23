@@ -1,17 +1,17 @@
 # Milestone 7 Verified & Multi-Milestone Full Verification Audit Brief
 
-**Status:** M2a, M2b, M2c, M3, M4, M5, M6, and M7 verified and hardened (ADR-028, ADR-029, ADR-030, ADR-031, ADR-032).
+**Status:** M2a, M2b, M2c, M3, M4, M5, M6, and M7 verified and hardened (ADR-028, ADR-029, ADR-030, ADR-031, ADR-032, ADR-033).
 **Baseline Commit:** `1b7e5829474239495163da1d2d3349eb35ca9744`  
 **Active Branch:** `feature/reliable-foundation`  
-**Audit Bundle:** `full-project-m7-review-bundle.zip`
+**Audit Bundle:** `full-project-m7-final-bundle.zip`
 
 ---
 
 ## 1. Executive Summary
 
-Milestone 7 (Read-Only Market Feed Bridge, HMAC Replay Cache & Loopback Ollama Desk Integration) has been implemented and hardened alongside all prior milestones (M2a, M2b, M2c, M3, M4, M5, M6).
+Milestone 7 (Read-Only Market Feed Bridge, HMAC Replay Cache & Loopback Ollama Desk Integration) has been implemented and hardened against adversarial vectors (ADR-032, ADR-033: no-redirect SSRF opener, symbol path traversal guards, concurrent cache thread safety, markdown fence stripping, and non-finite constant rejection) alongside all prior milestones (M2a, M2b, M2c, M3, M4, M5, M6).
 
-All 483 tests pass across the entire test suite on both genuine Python 3.11.9 (`.venv311`) and Python 3.14.4 (`.venv`). Measured test coverage is **88.34%** (strictly enforcing `--cov-fail-under=85`). Ruff linting, compileall byte-compilation on both Python versions, and blocking secret scanning (`detect-secrets-hook --baseline .secrets.baseline` version 1.5.0 scanning `requirements.lock`) pass with zero errors and zero unbaselined secrets. All new and existing source files and tests enforce zero inline `#` comments via automated tokenizer tests.
+All 487 tests pass across the entire test suite on both genuine Python 3.11.9 (`.venv311`) and Python 3.14.4 (`.venv`). Measured test coverage is **88.36%** (strictly enforcing `--cov-fail-under=85`). Ruff linting, compileall byte-compilation on both Python versions, and blocking secret scanning (`detect-secrets-hook --baseline .secrets.baseline` version 1.5.0 scanning `requirements.lock`) pass with zero errors and zero unbaselined secrets. All new and existing source files and tests enforce zero inline `#` comments via automated tokenizer tests.
 
 ---
 
@@ -186,7 +186,7 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 
 ---
 
-## 9. Milestone 7 — Read-Only Market Feed Bridge, HMAC Replay Cache & Loopback Ollama Desk Integration (ADR-032), Verified 2026-11-23
+## 9. Milestone 7 — Read-Only Market Feed Bridge, HMAC Replay Cache & Loopback Ollama Desk Integration (ADR-032 & ADR-033 Hardened), Verified 2026-11-23
 
 **Files:**
 - `src/agentic_trading/market_data/feed_bridge.py`
@@ -198,17 +198,19 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 
 | Area | Component | Behaviour & Hardening | Verification Test |
 |---|---|---|---|
-| Feed Bridge | `ReadOnlyMarketFeedBridge` | SSRF-hardened fetcher strictly enforcing HTTPS and allowlisted hosts (`query1.finance.yahoo.com`, `query2.finance.yahoo.com`), 1 MB payload limits, and non-finite constant rejection (`parse_constant=_reject_constant`). | `test_feed_bridge_ssrf_and_payload_caps`, `test_feed_bridge_rejects_non_finite_constants` |
+| Feed Bridge | `ReadOnlyMarketFeedBridge` | SSRF-hardened fetcher strictly enforcing HTTPS, allowlisted hosts (`query1.finance.yahoo.com`, `query2.finance.yahoo.com`), no-redirect urllib opener (`_NoRedirectHandler`), 1 MB payload limits, and non-finite constant rejection (`parse_constant=_reject_constant`). | `test_feed_bridge_ssrf_and_payload_caps`, `test_feed_bridge_rejects_non_finite_constants`, `test_feed_bridge_and_ollama_client_reject_http_redirects` |
+| Security | Symbol Sanitization | Strict symbol regex `^[A-Za-z0-9._-]{1,32}$` blocking `..`, `/`, `\`, null bytes, and whitespace; path-traversal rejection in feed bridge and HTTP 400 in `/api/feed/{exchange}/{symbol}`. | `test_path_traversal_symbol_rejection_in_feed_bridge_and_route` |
+| Concurrency | Cache Thread Safety | `threading.RLock()` synchronization in `ReplayFixtureStore` and `ReadOnlyMarketFeedBridge` preventing race conditions during concurrent cache writes/reads. | `test_concurrent_feed_bridge_cache_access_thread_safety` |
 | Quality Gate | `MarketDataQualityGate` | Batch validation checking monotonic timestamps, interval uniformity, positive OHLC, high/low envelopes, non-negative volume, and 50% max bar jump thresholds. | `test_quality_gate_detects_geometry_and_jump_violations` |
 | Replay Cache | `ReplayFixtureStore` | Tier-2 HMAC-SHA256 authenticated cache with deterministic `"synthetic"`, `"cache"`, and `"delayed_feed"` modes and automatic fallback. Directory traversal prevention. | `test_replay_fixture_store_cache_and_tamper_detection`, `test_feed_bridge_fallback_to_cache_and_synthetic` |
-| LLM Client | `LocalOllamaJSONClient` | Restricted strictly to loopback addresses (`127.0.0.1`, `localhost`, `::1`, `[::1]`) and HTTP/HTTPS schemes; model name regex sanitization; 256 KB response payload cap; strict JSON parsing. | `test_ollama_client_loopback_isolation_and_model_validation`, `test_ollama_client_payload_cap_and_json_parsing` |
-| LLM Failover | `FailoverLLMClient` | Transparent failover delegating to deterministic offline stub on network errors, timeouts, connection issues, or malformed JSON responses. | `test_failover_client_delegates_to_fallback` |
+| LLM Client | `LocalOllamaJSONClient` | Restricted strictly to loopback addresses (`127.0.0.1`, `localhost`, `::1`, `[::1]`) and HTTP/HTTPS schemes; no-redirect opener; model name regex sanitization; 256 KB payload cap; clean markdown fence extraction (`_extract_json_text`); strict `NaN`/`Infinity` rejection. | `test_ollama_client_loopback_isolation_and_model_validation`, `test_ollama_client_payload_cap_and_json_parsing`, `test_ollama_markdown_fences_and_non_finite_rejection_with_failover` |
+| LLM Failover | `FailoverLLMClient` | Transparent failover delegating to deterministic offline stub on network errors, timeouts, connection issues, non-finite constants, or malformed JSON responses. | `test_failover_client_delegates_to_fallback`, `test_ollama_markdown_fences_and_non_finite_rejection_with_failover` |
 | API & UI | Feed & Desk Integration | `GET /api/feed/{exchange}/{symbol}` endpoint with bounds validation; `llm_backend` and `feed_source` parameters in backtest and desk run APIs; UI selectors with zero external scripts. | `test_feed_endpoint_and_state_integration` |
-| Architecture | Zero Comments & Isolation | Automated tokenizer and AST verification enforcing 0 inline `#` comments and 0 forbidden imports. | `test_m7_sources_have_no_inline_comments_or_forbidden_imports` |
+| Architecture | Zero Comments & Isolation | Automated tokenizer and AST verification enforcing 0 inline `#` comments and 0 forbidden imports. | `test_no_inline_comments_in_m7_code`, `test_import_boundaries_maintained` |
 
 ### Suite Verification:
-- **Pytest:** 483 passed in 25.99s on Python 3.11 (`.venv311`), 483 passed in 23.92s on Python 3.14 (`.venv`).
-- **Coverage:** **88.34%** (exceeds mandatory `--cov-fail-under=85`).
+- **Pytest:** 487 passed in 22.56s on Python 3.11 (`.venv311`), 487 passed in 16.70s on Python 3.14 (`.venv`).
+- **Coverage:** **88.36%** (exceeds mandatory `--cov-fail-under=85`).
 - **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
 - **Secrets:** 0 leaks detected against `.secrets.baseline`.
 - **Inline `#` Comments:** 0 comments in git diff.

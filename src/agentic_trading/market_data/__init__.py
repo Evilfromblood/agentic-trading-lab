@@ -17,6 +17,12 @@ from agentic_trading.market_data.corporate_actions import (
     adjust_candles_for_corporate_actions,
     resolve_symbol_lineage,
 )
+from agentic_trading.market_data.feed_bridge import (
+    FeedFetchResult,
+    MarketDataQualityGate,
+    ReadOnlyMarketFeedBridge,
+    ReplayFixtureStore,
+)
 from agentic_trading.market_data.ingestion import (
     CoverageStatus,
     FreshnessPolicy,
@@ -98,6 +104,7 @@ __all__ = [
     "Exchange",
     "ExchangeCalendar",
     "ExchangeSession",
+    "FeedFetchResult",
     "FixtureIntegrityError",
     "FixtureManifest",
     "FreshnessPolicy",
@@ -108,6 +115,7 @@ __all__ = [
     "IST",
     "MarketCalendarRequiredError",
     "MarketDataIngestionPipeline",
+    "MarketDataQualityGate",
     "MarketDataProvider",
     "Money",
     "ProviderAdapter",
@@ -118,6 +126,8 @@ __all__ = [
     "ProviderTimeoutError",
     "QualityIssue",
     "RawDataValidationError",
+    "ReadOnlyMarketFeedBridge",
+    "ReplayFixtureStore",
     "SequenceIngestionResult",
     "StandardDictAdapter",
     "StoredReplayFixtureProvider",

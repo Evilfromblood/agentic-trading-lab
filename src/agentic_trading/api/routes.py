@@ -1,6 +1,7 @@
 """FastAPI endpoints for paper portfolio management, Kill Switch, orders, backtesting, and research desk."""
 from __future__ import annotations
 
+import re
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -175,10 +176,10 @@ def get_feed_candles(
             detail=f"Unsupported exchange '{exchange}'",
         )
     sym_clean = symbol.strip().upper()
-    if not sym_clean or len(sym_clean) > 64:
+    if not sym_clean or len(sym_clean) > 32 or not re.match(r"^[A-Za-z0-9._-]{1,32}$", sym_clean) or ".." in sym_clean:
         raise HTTPException(
             status_code=400,
-            detail="symbol must be non-empty and at most 64 characters",
+            detail="symbol must match ^[A-Za-z0-9._-]{1,32}$ and cannot contain '..'",
         )
     try:
         return state.get_feed_candles(

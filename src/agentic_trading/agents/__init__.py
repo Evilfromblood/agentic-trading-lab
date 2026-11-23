@@ -9,6 +9,7 @@ from agentic_trading.agents.envelope import (
 )
 from agentic_trading.agents.llm_client import (
     DeterministicStubLLMClient,
+    FailoverLLMClient,
     LLMClient,
     LocalOllamaJSONClient,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "DecisionRecord",
     "DeskCycleResult",
     "DeterministicStubLLMClient",
+    "FailoverLLMClient",
     "FundamentalSnapshot",
     "HumanLessonsStore",
     "LLMClient",
