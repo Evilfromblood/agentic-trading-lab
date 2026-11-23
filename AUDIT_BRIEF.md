@@ -1,17 +1,18 @@
-# Milestone 7 Verified & Multi-Milestone Full Verification Audit Brief
+# End-to-End Platform Audit & Release Candidate Verification (Milestones 1–7)
 
-**Status:** M2a, M2b, M2c, M3, M4, M5, M6, and M7 verified and hardened (ADR-028, ADR-029, ADR-030, ADR-031, ADR-032, ADR-033, ADR-034).
+**Status:** M1 through M7 complete, verified, and hardened (ADR-001 through ADR-035).
 **Baseline Commit:** `1b7e5829474239495163da1d2d3349eb35ca9744`  
 **Active Branch:** `feature/reliable-foundation`  
-**Audit Bundle:** `full-project-m7-final-bundle.zip`
+**Audit Bundle:** `full-project-rc1-bundle.zip`
 
 ---
 
 ## 1. Executive Summary
 
-Milestone 7 (Read-Only Market Feed Bridge, HMAC Replay Cache, Loopback Ollama Desk Integration, and Minimalist Dashboard UI) has been implemented and hardened against adversarial vectors (ADR-032, ADR-033, ADR-034: no-redirect SSRF opener, symbol path traversal guards, concurrent cache thread safety, markdown fence stripping, non-finite constant rejection, and minimalist dark-slate UI with human-readable reporting) alongside all prior milestones (M2a, M2b, M2c, M3, M4, M5, M6).
+Milestones 1 through 7 (Market Data Foundation, Ingestion, Cross-Market Instruments, Simulation & Risk Gate, Time Machine, Paper Trading & 7-Agent Desk, Local-First FastAPI Dashboard, Read-Only Feed Bridge, and Loopback Ollama Integration) have been completely implemented, hardened against adversarial vectors, and verified end-to-end (ADR-001 through ADR-035).
 
-All 487 tests pass across the entire test suite on both genuine Python 3.11.9 (`.venv311`) and Python 3.14.4 (`.venv`). Measured test coverage is **88.33%** (strictly enforcing `--cov-fail-under=85`). Ruff linting, compileall byte-compilation on both Python versions, and blocking secret scanning (`detect-secrets-hook --baseline .secrets.baseline` version 1.5.0 scanning `requirements.lock`) pass with zero errors and zero unbaselined secrets. All new and existing source files and tests enforce zero inline `#` comments via automated tokenizer tests.
+All 490 tests pass across the entire test suite on both genuine Python 3.11.9 (`.venv311`) and Python 3.14.4 (`.venv`). Measured test coverage is **88.33%** (strictly enforcing `--cov-fail-under=85`). Ruff linting, compileall byte-compilation on both Python versions, and blocking secret scanning (`detect-secrets-hook --baseline .secrets.baseline` version 1.5.0 scanning `requirements.lock`) pass with zero errors and zero unbaselined secrets. All new and existing source files and tests enforce zero inline `#` comments via automated tokenizer tests. Release Candidate 1 (`full-project-rc1-bundle.zip`) is fully sealed and verified.
+
 
 ---
 
@@ -230,6 +231,38 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 
 ### Suite Verification:
 - **Pytest:** 487 passed in 13.12s on Python 3.11 (`.venv311`), 487 passed in 14.20s on Python 3.14 (`.venv`).
+- **Coverage:** **88.33%** (exceeds mandatory `--cov-fail-under=85`).
+- **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
+- **Secrets:** 0 leaks detected against `.secrets.baseline`.
+- **Inline `#` Comments:** 0 comments in git diff.
+---
+
+## 11. End-to-End Platform Audit & Release Sign-Off (ADR-035), Verified 2026-11-23
+
+**Files:**
+- `tests/test_e2e_platform_audit.py`
+- `tests/test_import_boundaries.py`
+- `src/agentic_trading/api/app.py`
+- `src/agentic_trading/api/state.py`
+- `src/agentic_trading/paper_trading/broker.py`
+- `src/agentic_trading/time_machine/engine.py`
+- `src/agentic_trading/agents/orchestrator.py`
+
+| Area | Component | Behaviour & Hardening | Verification Test |
+|---|---|---|---|
+| Security | Paper-Only Boundary | `paper_only: Literal[True] = True` across all API schemas and state responses. Zero live broker imports (`zerodha`, `kiteconnect`) across `src/agentic_trading/`. | `tests/test_e2e_platform_audit.py::test_import_boundaries_maintained`, `tests/test_e2e_platform_audit.py::test_end_to_end_platform_lifecycle_audit` |
+| Security | Host & Network Controls | Loopback `Host` validation, DNS-rebinding guards, cross-origin state mutation blocking (HTTP 403 on invalid Origin/Referer), and defensive CSP/security headers in `app.py`. | `tests/test_m6_api_and_dashboard.py::test_dns_rebinding_and_cross_origin_state_mutation_blocked`, `tests/test_m6_api_and_dashboard.py::test_security_headers_present` |
+| Security | SSRF & Traversal Defenses | No-redirect HTTP openers (`_NoRedirectHandler`), allowlisted Yahoo chart hosts, 1 MB payload limits, and regex symbol validation (`^[A-Za-z0-9._-]{1,32}$`) in `feed_bridge.py`. Loopback isolation in `LocalOllamaJSONClient`. | `tests/test_m7_feeds_and_ollama.py::test_feed_bridge_and_ollama_client_reject_http_redirects`, `tests/test_m7_feeds_and_ollama.py::test_path_traversal_symbol_rejection_in_feed_bridge_and_route` |
+| Accounting | Mathematical Conservation | Exact `Decimal("0")` residual: `(deposits - withdrawals + realized_pnl + dividends - fees) - (cash + open_total_cost_basis) == Decimal("0")` across ledger, portfolio, time machine, paper broker, and API state. | `tests/test_e2e_platform_audit.py::test_end_to_end_platform_lifecycle_audit`, `tests/test_m3_simulation_and_risk.py::test_r2_exact_zero_drift_conservation_residual` |
+| Accounting | Currency Isolation | Strict isolation between INR (`NSE`/`BSE`) and USD (`NYSE`/`NASDAQ`) virtual portfolios with zero cross-currency fills or shared cash pools. | `tests/test_e2e_platform_audit.py::test_end_to_end_platform_lifecycle_audit`, `tests/test_m6_api_and_dashboard.py::test_inr_and_usd_portfolio_isolation` |
+| Concurrency | Thread Safety & Persistence | Parameterized SQLite queries with `with conn:` transactions in `memory.py`. Shared state mutations in `state.py`, `broker.py`, and `feed_bridge.py` protected by `threading.RLock`. | `tests/test_e2e_platform_audit.py::test_end_to_end_platform_lifecycle_audit`, `tests/test_m6_api_and_dashboard.py::test_concurrent_state_and_portfolio_conservation` |
+| Causality | Time Machine Backtest | Next-open execution, causal bar-close signal evaluation, cancellation of final-bar pending orders (`END_OF_DATA_PENDING_CANCELLED`), and keyed HMAC-SHA256 manifest authentication. | `tests/test_e2e_platform_audit.py::test_end_to_end_platform_lifecycle_audit`, `tests/test_m4_time_machine.py::test_signal_executes_at_next_open_not_signal_close` |
+| Multi-Agent | Deterministic Orchestration | Deterministic fan-out ordering under `ThreadPoolExecutor`, pre-Stage 4 kill switch re-checks, read-only `HumanLessonsStore`, and fail-closed error fallback to `data_quality="missing"`. | `tests/test_e2e_platform_audit.py::test_end_to_end_platform_lifecycle_audit`, `tests/test_m5_paper_and_agents.py::test_orchestrator_deterministic_stage1_fan_out_ordering_under_threadpool` |
+| End-to-End | Lifecycle Integration | Unified lifecycle: portfolio initialization, synthetic feed fetch, backtest with verified manifest and zero residual, 7-agent research desk cycle with SQLite audit logging, kill switch order blocking (HTTP 409), resume, and final reconciliation. | `tests/test_e2e_platform_audit.py::test_end_to_end_platform_lifecycle_audit` |
+| Cleanliness | Zero Inline Comments | Repository-wide tokenizer assertion verifying zero inline `#` comments across all modules under `src/agentic_trading/`. | `tests/test_e2e_platform_audit.py::test_repository_wide_zero_inline_comments` |
+
+### Suite Verification:
+- **Pytest:** 490 passed in 16.58s on Python 3.11 (`.venv311`), 490 passed in 14.72s on Python 3.14 (`.venv`).
 - **Coverage:** **88.33%** (exceeds mandatory `--cov-fail-under=85`).
 - **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
 - **Secrets:** 0 leaks detected against `.secrets.baseline`.

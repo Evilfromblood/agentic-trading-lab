@@ -1,6 +1,6 @@
 # Next Actions
 
-Current priority: Milestone 7 Hardened (Read-Only Market Feed Bridge, HMAC Replay Cache & Loopback Ollama Desk Integration — ADR-032 & ADR-033) is complete and verified. All milestones (M2a, M2b, M2c, M3, M4, M5, M6, M7) are implemented, tested, and verified across Python 3.11 and Python 3.14. Next step is packaging the final verification archive and external adversarial review.
+Current priority: Release Candidate 1 (Milestones 1–7 Platform Sign-Off — ADR-035) is complete and verified. All milestones (M2a, M2b, M2c, M3, M4, M5, M6, M7, and RC1) are implemented, tested, and verified across Python 3.11 and Python 3.14. Release package `full-project-rc1-bundle.zip` is sealed for final external sign-off.
 
 ## Immediate sequence
 1. Baseline M2a committed (`1b7e582`) and pushed to `origin/feature/reliable-foundation`.
@@ -53,7 +53,12 @@ Current priority: Milestone 7 Hardened (Read-Only Market Feed Bridge, HMAC Repla
    - Loopback-isolated `LocalOllamaJSONClient` with no-redirect transport, model name regex sanitization, 256 KB response limits, clean markdown fence stripping, strict `NaN`/`Infinity` rejection, and `FailoverLLMClient` transparent delegation.
    - API endpoints (`GET /api/feed/{exchange}/{symbol}`), schema parameters (`llm_backend`, `ollama_model`, `feed_source`), and dashboard selector controls.
    - 487 tests passing across the full suite on Python 3.11 and Python 3.14 with 88.36% coverage. Zero inline `#` comments.
-9. Next: Independent external adversarial verification of M7 final package, followed by strategy optimization and live market feed paper integration.
+9. Release Candidate 1 (RC1 Platform Sign-Off — ADR-035):
+   - Full cross-milestone audit verifying paper-only boundary controls, exact mathematical accounting conservation, causal backtesting physics, multi-agent determinism, and repository-wide code cleanliness.
+   - Comprehensive end-to-end integration test (`tests/test_e2e_platform_audit.py`) exercising the complete platform lifecycle in a single test flow.
+   - Dual-Python verification: 490 passed across Python 3.11 and Python 3.14 with 88.33% coverage.
+   - Packaged and frozen release bundle: `full-project-rc1-bundle.zip`.
+10. Next: Independent external adversarial verification of RC1 package, followed by live market feed paper trading experiments.
 
 ## Review/remediation loop
 Claude independent verification -> ChatGPT triage and scoped technical direction -> Antigravity implementation and regression tests -> independent verification of the new snapshot. Avoid overlapping audits of unchanged code when a focused remediation cycle is more efficient.

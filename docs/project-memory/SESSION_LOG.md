@@ -2,6 +2,32 @@
 
 Append concise entries in reverse chronological order. Record verified outcomes, not intentions.
 
+## 2026-11-23 — End-to-End Platform Audit & Release Candidate Verification (ADR-035)
+- Conducted comprehensive cross-milestone audit and end-to-end integration verification across Milestones 1 through 7:
+  - **Defense-in-Depth & Paper-Only Boundary Audit**:
+    - Confirmed `paper_only: Literal[True] = True` across API schemas and state responses.
+    - Verified architectural boundary enforcement in `test_import_boundaries.py` guaranteeing zero live broker imports.
+    - Verified loopback-only host validation, DNS-rebinding guards, cross-origin state mutation blocking, and CSP defensive headers in `app.py`.
+    - Verified SSRF-hardened no-redirect HTTP openers, allowlisted Yahoo chart hosts, 1 MB payload limits, and regex symbol validation in `feed_bridge.py`.
+    - Verified loopback isolation, no-redirect opener, and non-finite JSON rejection in `LocalOllamaJSONClient`.
+    - Confirmed fail-closed kill switch behavior on env vars, sentinel files, and `OSError` exceptions.
+  - **Accounting Conservation & Currency Isolation Audit**:
+    - Confirmed exact `Decimal("0")` conservation residual across ledger, portfolio, time machine, paper broker, and API state.
+    - Confirmed strict isolation between INR (`NSE`/`BSE`) and USD (`NYSE`/`NASDAQ`) virtual portfolios with zero cross-currency fills.
+    - Verified parameterized SQLite queries with `with conn:` blocks in `memory.py` and thread-safe `RLock` synchronization across state, broker, and feed bridge.
+  - **Causal Backtesting & Multi-Agent Determinism Audit**:
+    - Confirmed causal next-open entry execution, causal signal evaluation at bar close, cancellation of final-bar pending orders (`END_OF_DATA_PENDING_CANCELLED`), and keyed HMAC-SHA256 manifest authentication in `time_machine/engine.py`.
+    - Confirmed deterministic fan-out ordering under `ThreadPoolExecutor`, pre-Stage 4 kill switch re-checks, read-only `HumanLessonsStore`, and fail-closed error fallback in `TradingDeskOrchestrator`.
+  - **End-to-End Platform Integration Test (`tests/test_e2e_platform_audit.py`)**:
+    - Added test exercising complete platform lifecycle: isolated INR/USD accounts, synthetic feed fetches, backtest with verified manifest and zero residual, 7-agent research desk cycle with SQLite decision logging, kill switch order blocking (HTTP 409), resume, final portfolio reconciliation, and repository-wide tokenizer validation of zero inline `#` comments.
+- **Validation results**:
+  - Full pytest suite: **490 passed in 16.58s** on Python 3.11.9 (`.venv311`) and **490 passed in 14.72s** on Python 3.14.4 (`.venv`).
+  - Genuine pytest-cov coverage: **88.33%** (exceeding mandatory `--cov-fail-under=85`).
+  - Ruff `src`, `tests`, and `v3-zerodha/src`: `All checks passed!`.
+  - Python compileall: passed with exit code 0 on both 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` passed with 0 unbaselined secrets.
+  - Zero inline `#` comments verified across all git diff additions.
+
 ## 2026-11-23 — Dashboard UI Simplification & Human-Readable Desk Output Formatting (ADR-034)
 - Redesigned local dashboard and formatted daily reporter summaries for enhanced readability, scannability, and operational focus:
   - **Human-Readable Money & Clean Report Headings (`src/agentic_trading/agents/reporter.py`)**:
