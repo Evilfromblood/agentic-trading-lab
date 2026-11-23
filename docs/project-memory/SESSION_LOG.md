@@ -2,6 +2,34 @@
 
 Append concise entries in reverse chronological order. Record verified outcomes, not intentions.
 
+## 2026-11-23 — Milestone 6 Implementation: Local-First FastAPI Backend & Dashboard (ADR-030)
+- Implemented and verified complete Milestone 6 architecture across API schemas, state management, REST endpoints, and local web dashboard:
+  - **Pydantic v2 Schemas (`src/agentic_trading/api/schemas.py`)**:
+    - Enforced `paper_only: Literal[True] = True` across all system status, portfolio, order, backtest, and desk payloads.
+    - Implemented strict currency validation (`Literal["INR", "USD"]`) and custom validators rejecting `NaN`, `Infinity`, non-positive, or boolean values for prices, quantities, and capital (returning HTTP 422).
+    - Modeled `HealthResponse`, `KillSwitchRequest`/`Response`, `PortfolioSummaryResponse`, `SubmitOrderRequest`, `OrderResponse`, `BacktestRequest`/`Response`, `DeskRunRequest`/`Response`, and `DecisionRecordItem`.
+  - **Thread-Safe State & Isolated Virtual Accounts (`src/agentic_trading/api/state.py`)**:
+    - Created `TradingLabState` protected by `threading.RLock()`.
+    - Maintained two strictly isolated virtual portfolios (INR for NSE/BSE with statutory Indian fees, USD for NYSE/NASDAQ with US fees) initialized with historical base deposit timestamps.
+    - Connected shared `KillSwitch`, SQLite `DecisionLog`, `HumanLessonsStore`, `DeterministicStubLLMClient`, `TradingDeskOrchestrator`, and `BacktestEngine`.
+  - **FastAPI REST Endpoints (`src/agentic_trading/api/routes.py`)**:
+    - Implemented `GET /api/health`, `GET /api/status`, `POST /api/kill-switch`, `GET /api/portfolios/{currency}`, `POST /api/orders`, `POST /api/orders/{currency}/{client_order_id}/cancel`, `POST /api/backtest`, `POST /api/desk/run`, and `GET /api/decisions`.
+    - Enforced HTTP 409 when `KillSwitch` is active, HTTP 400 on cross-currency/exchange mismatches or invalid cancellations, and HTTP 404 on missing orders.
+  - **Self-Contained Dashboard (`src/agentic_trading/api/dashboard.py`)**:
+    - Built single-page local monitoring UI with zero external CDN dependencies (zero external script or stylesheet links).
+    - Featured `PAPER TRADING ONLY` banner, interactive Emergency Stop button, side-by-side INR/USD portfolio cards with 0 conservation residual badge, and safe DOM manipulation (`textContent`).
+  - **App Factory (`src/agentic_trading/api/app.py`)**:
+    - Configured `create_app` with clean async `lifespan` context manager closing SQLite connections on shutdown, and localhost-only binding (`127.0.0.1:8000`).
+  - **Test Suite (`tests/test_m6_api_and_dashboard.py`)**:
+    - Added 10 comprehensive tests covering dashboard rendering, zero external scripts, INR/USD portfolio isolation, idempotent order submission, unmarketable limit pending state and cancellation, kill switch blocking, backtest manifest verification, desk cycle run and SQLite decision log retrieval, zero inline comments, and architectural import boundaries.
+- **Validation results**:
+  - Full pytest suite: **467 passed in 7.94s** on Python 3.11.9 (`.venv311`) and **467 passed in 4.98s** on Python 3.14.4 (`.venv`).
+  - Genuine pytest-cov coverage: **88.12%** (exceeding mandatory `--cov-fail-under=85`).
+  - Ruff `src`, `tests`, and `v3-zerodha/src`: `All checks passed!`.
+  - Python compileall: passed with exit code 0 on both 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files including `requirements.lock`.
+  - Zero inline `#` comments verified across all git diff additions.
+
 ## 2026-11-23 — Milestone 5 Adversarial Audit & Hardening (ADR-029)
 - Hardened all Milestone 5 components against adversarial failure modes, concurrency races, and prompt injections:
   - **PaperBroker Limit Price Bounds, State Machine & Concurrency (`broker.py`)**:

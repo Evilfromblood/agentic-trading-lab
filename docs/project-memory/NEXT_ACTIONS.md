@@ -1,6 +1,6 @@
 # Next Actions
 
-Current priority: Milestone 5 (Paper Trading Engine & 7-Agent AI Research Desk) is complete and verified. Next step is independent verification / packaging, followed by Milestone 6 (Live Web Dashboard & Visual Monitoring). Milestones 2a, 2b, 2c, 3, 4, and 5 are verified.
+Current priority: Milestone 6 (Local-First FastAPI Backend & Interactive Web Dashboard) is complete and verified. All milestones (M2a, M2b, M2c, M3, M4, M5, M6) are implemented, tested, and verified across Python 3.11 and Python 3.14. Next step is packaging the verification archive and external adversarial review.
 
 ## Immediate sequence
 1. Baseline M2a committed (`1b7e582`) and pushed to `origin/feature/reliable-foundation`.
@@ -36,7 +36,14 @@ Current priority: Milestone 5 (Paper Trading Engine & 7-Agent AI Research Desk) 
    - Authoritative risk gate extended with sector concentration limits (`SECTOR_LIMIT_EXCEEDED`) and corporate event blackout (`EVENT_BLACKOUT`).
    - 7-Agent AI Research Desk: strict JSON schema `AgentEnvelope` with input hashing and non-finite input guards, framework-agnostic `LLMClient` with deterministic stubs, 3-tier memory (`WorkingState`, append-only SQLite `DecisionLog` with deterministic retrieval, read-only `HumanLessonsStore`), Market Analyst with evidence number verification and invalidation guards, Data Analyst with filing staleness checks, News Analyst with control character stripping, sentiment clamping, and blackout enforcement, Opportunity Scout with shortlist capping, Strategist with deterministic math verification of pricing and reward-to-risk, Daily Reporter EOD executive summary, and 4-stage pipeline `TradingDeskOrchestrator` with deterministic fan-out ordering and pre-Stage 4 kill switch checks.
    - 457 tests passing across the full suite on Python 3.11 and Python 3.14 with 87.91% coverage. Zero inline `#` comments.
-7. Next: Milestone 6 (Live Web Dashboard & Visual Monitoring), strategy optimization, and live feed paper testing.
+7. M6 Local-First FastAPI Backend & Interactive Web Dashboard implemented and verified (ADR-030):
+   - Strict Pydantic v2 schemas (`src/agentic_trading/api/schemas.py`) enforcing `paper_only=True` and positive finite bounds across all endpoints.
+   - Thread-safe `TradingLabState` (`src/agentic_trading/api/state.py`) with isolated virtual INR and USD accounts, shared `KillSwitch`, SQLite `DecisionLog`, and offline LLM client stubs.
+   - FastAPI REST endpoints (`src/agentic_trading/api/routes.py`) for system health, kill switch toggle, order submission/cancellation, portfolio reporting, backtesting, and 7-agent research desk cycles.
+   - Self-contained local web dashboard (`src/agentic_trading/api/dashboard.py`) serving single-page HTML UI with zero external CDN dependencies, Emergency Stop button, and safe DOM manipulation.
+   - Clean application lifecycle and localhost-only binding (`127.0.0.1:8000`) in `src/agentic_trading/api/app.py`.
+   - 467 tests passing across the full suite on Python 3.11 and Python 3.14 with 88.12% coverage. Zero inline `#` comments.
+8. Next: Independent external adversarial verification of M6 package, followed by strategy optimization and live market feed paper integration.
 
 ## Review/remediation loop
 Claude independent verification -> ChatGPT triage and scoped technical direction -> Antigravity implementation and regression tests -> independent verification of the new snapshot. Avoid overlapping audits of unchanged code when a focused remediation cycle is more efficient.

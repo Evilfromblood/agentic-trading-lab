@@ -383,3 +383,44 @@ Append decisions; do not silently rewrite historical decisions. Mark superseded 
   - Python compileall: passed with exit code 0 on both Python 3.11 and 3.14.
   - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files including `requirements.lock`.
   - Zero inline `#` comments verified across all git diff additions.
+
+
+## ADR-030 (Milestone 6: Local-First FastAPI Backend & Self-Contained Monitoring Dashboard)
+- **Status:** Accepted (2026-11-23)
+- **Context:** Milestone 6 establishes a local-first HTTP REST API and visual monitoring dashboard for paper trading operations, portfolio tracking, kill switch controls, 7-agent research desk cycles, and Time Machine backtesting.
+- **Decisions:**
+  1. **Strict Pydantic Schemas (`src/agentic_trading/api/schemas.py`):**
+     - Enforce `paper_only: Literal[True] = True` across health, status, portfolio, order, backtest, and research desk payloads.
+     - Strict currency validation (`Literal["INR", "USD"]`) and positive finite `Decimal` / `int` bounds, rejecting `NaN`, `Infinity`, non-positive, or boolean values with HTTP 422.
+     - Full request and response models for `HealthResponse`, `KillSwitchRequest`/`Response`, `PortfolioSummaryResponse`, `SubmitOrderRequest`, `OrderResponse`, `BacktestRequest`/`Response`, `DeskRunRequest`/`Response`, and `DecisionRecordItem`.
+  2. **Thread-Safe State & Isolated Virtual Portfolios (`src/agentic_trading/api/state.py`):**
+     - Implemented `TradingLabState` protected by `threading.RLock()`.
+     - Maintains two strictly isolated virtual accounts: INR account (`NSE`/`BSE`, `IndiaEquityFeeModel`, `BasisPointsSlippageModel`) and USD account (`NYSE`/`NASDAQ`, `USEquityFeeModel`, `BasisPointsSlippageModel`).
+     - Wires shared `KillSwitch` (backed by configurable `STOP` sentinel file), append-only SQLite `DecisionLog`, read-only `HumanLessonsStore`, `DeterministicStubLLMClient`, `TradingDeskOrchestrator`, and `BacktestEngine`.
+     - Initial deposits dated in the past (`2025-01-01`) guaranteeing monotonic causal ledger timestamps across order submissions and synthetic candle series.
+  3. **FastAPI Endpoints (`src/agentic_trading/api/routes.py`):**
+     - `GET /api/health` and `GET /api/status`: return system status and kill switch state.
+     - `POST /api/kill-switch`: creates/removes the configured `STOP` sentinel file deterministically and returns updated kill switch state.
+     - `GET /api/portfolios/{currency}`: returns isolated INR or USD snapshot, open positions, recent ledger events, and verified `ReconciliationReport` asserting exact `0` conservation residual; returns HTTP 400 on unsupported currencies.
+     - `POST /api/orders` & `POST /api/orders/{currency}/{client_order_id}/cancel`: route through `PaperBroker`, returning HTTP 409 when `KillSwitch` is active, HTTP 400 on currency mismatch or terminal cancel, and HTTP 404 on missing orders.
+     - `POST /api/backtest`: executes `BacktestEngine` + `run_seeded_monte_carlo`, verifies `manifest_sha256` integrity, and verifies `Decimal("0")` conservation residual.
+     - `POST /api/desk/run`: runs full 4-stage 7-agent research desk cycle, persists decisions to `DecisionLog`, and returns EOD markdown report.
+     - `GET /api/decisions`: reads append-only audit trail records with optional `run_id` filter.
+  4. **Self-Contained Dashboard (`src/agentic_trading/api/dashboard.py`):**
+     - Serves `GET /` returning single-page web UI with inline CSS and vanilla JS.
+     - Zero external CDN links (zero external `<script>` or `<link>` tags) for local security.
+     - Prominent `PAPER TRADING ONLY` banner, interactive `EMERGENCY STOP` Kill Switch toggle, side-by-side INR/USD portfolio cards with conservation residual badge, and safe DOM manipulation (`textContent`).
+  5. **Application Lifecycle (`src/agentic_trading/api/app.py`):**
+     - `create_app` factory with clean `lifespan` context manager closing SQLite connections on shutdown.
+     - Localhost-only entrypoint (`127.0.0.1:8000`, never `0.0.0.0`).
+  6. **Zero Comments & Framework Independence:**
+     - Zero inline `#` comments across all API source files and tests.
+     - Zero FastAPI or web imports in domain modules (`market_data`, `simulation`, `risk_engine`, `strategy`, `time_machine`, `paper_trading`, `agents`).
+- **Consequences:** Provides a complete local web dashboard and REST API for paper trading monitoring, strategy backtesting, and multi-agent desk execution with zero live financial or network risk.
+- **Verification Evidence:**
+  - Full pytest suite: **467 passed in 7.94s** on Python 3.11.9 (`.venv311`) and **467 passed in 4.98s** on Python 3.14.4 (`.venv`).
+  - Genuine pytest-cov coverage: **88.12%** (exceeding mandatory `--cov-fail-under=85`).
+  - Ruff `src`, `tests`, and `v3-zerodha/src`: `All checks passed!`.
+  - Python compileall: passed with exit code 0 on both Python 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files including `requirements.lock`.
+  - Zero inline `#` comments verified across all git diff additions.
