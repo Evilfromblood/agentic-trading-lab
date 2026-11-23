@@ -266,6 +266,7 @@ class DeskRunRequest(BaseModel):
     llm_backend: Literal["stub", "ollama"] = "stub"
     ollama_model: str = Field(default="gemma4:12b", min_length=1, max_length=64)
     feed_source: Literal["synthetic", "cache", "delayed_feed"] = "synthetic"
+    context_source: Literal["synthetic", "cache", "live"] = "synthetic"
     auto_buy: bool = True
 
     @field_validator("watchlist")
@@ -369,6 +370,7 @@ class DeskRunResponse(BaseModel):
     reconciled: bool
     llm_backend: str = Field(default="stub", max_length=64)
     feed_source: str = Field(default="synthetic", max_length=64)
+    context_source: str = Field(default="synthetic", max_length=64)
     timestamp: datetime
     watchlist: list[str] = []
     ollama_model: str = Field(default="gemma4:12b", max_length=64)
@@ -387,6 +389,7 @@ class CycleSummaryItem(BaseModel):
     currency: str = Field(..., max_length=64)
     watchlist: list[str]
     feed_source: str = Field(..., max_length=64)
+    context_source: str = Field(default="synthetic", max_length=64)
     llm_backend: str = Field(..., max_length=64)
     ollama_model: str = Field(..., max_length=64)
     approved_count: int
@@ -404,6 +407,7 @@ class CycleDetailResponse(BaseModel):
     currency: str = Field(..., max_length=64)
     watchlist: list[str]
     feed_source: str = Field(..., max_length=64)
+    context_source: str = Field(default="synthetic", max_length=64)
     llm_backend: str = Field(..., max_length=64)
     ollama_model: str = Field(..., max_length=64)
     shortlist: list[str]
@@ -522,3 +526,51 @@ class ResetSandboxResponse(BaseModel):
     status: str = "ok"
     message: str = "Sandbox reset successfully"
     paper_only: Literal[True] = True
+
+
+class FundamentalSnapshotItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str = Field(..., max_length=64)
+    as_of_filing: str = Field(..., max_length=64)
+    revenue_growth_yoy: Decimal
+    operating_margin: Decimal
+    fcf_margin: Decimal
+    debt_to_equity: Decimal
+    interest_coverage: Decimal
+    pe_vs_peer_median: Decimal
+    dilution_yoy: Decimal
+    peer_set: list[str] = []
+
+
+class NewsArticleItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    headline: str = Field(..., max_length=512)
+    source: str = Field(..., max_length=128)
+    source_tier: int = Field(default=1, ge=1, le=3)
+    published_at: str = Field(..., max_length=64)
+    summary: str = Field(default="", max_length=2048)
+
+
+class ScheduledEventItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_name: str = Field(..., max_length=256)
+    event_date: str = Field(..., max_length=64)
+    event_type: str = Field(..., max_length=64)
+
+
+class ContextResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    paper_only: Literal[True] = True
+    symbol: str = Field(..., max_length=64)
+    exchange: str = Field(..., max_length=64)
+    currency: str = Field(..., max_length=64)
+    source: str = Field(..., max_length=64)
+    is_blackout: bool
+    snapshot: FundamentalSnapshotItem
+    articles: list[NewsArticleItem] = []
+    scheduled_events: list[ScheduledEventItem] = []
+    warnings: list[str] = []

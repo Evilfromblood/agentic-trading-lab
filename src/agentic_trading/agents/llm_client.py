@@ -79,6 +79,15 @@ class DeterministicStubLLMClient:
         if self._handler is not None:
             return self._handler(system_prompt, user_payload, model)
 
+        if "News" in system_prompt or "untrusted_articles" in user_payload:
+            return json.dumps({
+                "events": ["Positive product announcement"],
+                "scheduled": [],
+                "net_sentiment": 0.5,
+                "blackout_suggested": False,
+                "data_quality": user_payload.get("data_quality", "ok"),
+            })
+
         if "Market" in system_prompt or "sma_20" in user_payload:
             close_val = user_payload.get("close", "100.0")
             support_val = user_payload.get("support", "95.0")
@@ -100,15 +109,6 @@ class DeterministicStubLLMClient:
                 "safety": 4,
                 "red_flags": [],
                 "summary": "Strong revenue growth and conservative debt metrics",
-                "data_quality": user_payload.get("data_quality", "ok"),
-            })
-
-        if "News" in system_prompt or "untrusted_articles" in user_payload:
-            return json.dumps({
-                "events": ["Positive product announcement"],
-                "scheduled": [],
-                "net_sentiment": 0.5,
-                "blackout_suggested": False,
                 "data_quality": user_payload.get("data_quality", "ok"),
             })
 

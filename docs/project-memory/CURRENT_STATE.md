@@ -61,10 +61,10 @@ Verified local Windows virtual environment output:
 - Python compileall: `python -m compileall -q src tests v3-zerodha/src` passed with exit code 0 on both 3.11.9 and 3.14.4.
 - `git diff --check`: exit code 0 (no whitespace errors or merge markers).
 - Detect-secrets hook: passed with 0 detected leaks.
-- Full pytest suite: **507 passed in 15.68s** on genuine Python 3.11.9 (.venv311) and **507 passed in 12.69s** on Python 3.14.4 (.venv) with **88.35% total coverage** (exceeding 85% requirement).
-- Genuine pytest-cov coverage: **88.33%** (exceeding mandatory 85% threshold with `--cov-fail-under=85`).
+- Full pytest suite: **515 passed in 14.82s** on genuine Python 3.11.9 (.venv311) and **515 passed in 11.95s** on Python 3.14.4 (.venv) with **88.37% total coverage** (exceeding 85% requirement).
+- Genuine pytest-cov coverage: **88.37%** (exceeding mandatory 85% threshold with `--cov-fail-under=85`).
 - Secret scanning hook: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files, scanning `requirements.lock`.
-- Zero inline `#` comments verified across all audited modules in M4 through M7 (`time_machine/`, `paper_trading/`, `agents/`, `api/`, `feed_bridge.py`) and all new tests (legacy M2a foundation files retain original comments).
+- Zero inline `#` comments verified across all audited modules in M4 through M10 (`time_machine/`, `paper_trading/`, `agents/`, `api/`, `feed_bridge.py`, `context_bridge.py`) and all new tests (legacy M2a foundation files retain original comments).
 
 ## Current milestone
 - Milestone 2a: COMPLETE and committed (`1b7e582`).
@@ -79,6 +79,8 @@ Verified local Windows virtual environment output:
 - Release Candidate 2 (RC2 Remediation): COMPLETE and verified (ADR-036). Resolved all 8 audit findings: manual order risk gating and server-resolved pricing, lock-free kill switch responsiveness (<0.5s), intra-cycle multi-ticker sequential snapshot exposure limits, removal of fabricated mock objects in desk runs, mark-to-market valuation with exact zero residual conservation, numeric reconciliation check in dashboard JS, and replay cache HMAC key isolation/propagation. Dual-Python verification (495 passed, 88.33% coverage). Frozen package: `full-project-rc2-bundle.zip`.
 - Abstracted Dashboard UI with Active Cycle Inspector & Agent Chat Trace: COMPLETE and verified (ADR-037). Granular `chat_trace` capture across Stages 1–4, SQLite cycle history persistence in `DecisionLog`, REST endpoints `GET /api/cycles` and `GET /api/cycles/{run_id}`, redesigned dark-slate dashboard UI with Reviewing Cycle Context Strip, abstracted portfolio cards, candidate screening badges, executed orders table, and 4-stage Agent Chat inspection cards.
 - Auto-Buy Toggle, AI Buy/Sell Price Plan Cards & Candlestick Chart with AI Overlays: COMPLETE and verified (ADR-038). Added `auto_execute` toggle control in `TradingDeskOrchestrator`, structured `trade_plans` and `candle_series` captured in `DeskCycleResult`, backward-compatible SQLite migration and persistence in `DecisionLog`, Pydantic schemas and REST APIs (`auto_buy`, `trade_plans`, `candle_series`, `candles`), redesigned dashboard with Auto-Buy toggle switch, AI Trade Plans table with manual `Execute Paper Buy` action, and self-contained HTML5 `<canvas>` candlestick chart with AI levels, shaded reward/risk zones, and hover crosshair.
+- Complete Workstation Upgrade: COMPLETE and verified (ADR-039). Concrete quantitative strategy library, live open positions listing and liquidation (`POST /api/positions/close`), strategy-selectable backtesting with visual canvas equity curve, SQLite lessons store (`/api/lessons`), and safeguarded sandbox reset (`POST /api/sandbox/reset`). Tagged `v1.0.0`.
+- SSRF-Hardened Fundamentals & Financial News Ingestion Adapters: COMPLETE and verified (ADR-041). SSRF-hardened `ReadOnlyContextBridge` supporting `"synthetic"`, `"cache"`, and `"live"` modes; XML XXE entity/doctype defense; real fundamental ratios and sector news fed into `DataAnalyst` and `NewsAnalyst` with `data_quality="ok"`; automated earnings blackout enforcement (`EVENT_BLACKOUT`); `GET /api/context/{exchange}/{symbol}` endpoint; Context Source selector and Fundamental/Catalyst badges in Dashboard UI. Tagged `v1.2.0`.
 
 ## Development workflow
 1. Claude independently verifies a frozen snapshot.

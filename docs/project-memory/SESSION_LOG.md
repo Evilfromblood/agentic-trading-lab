@@ -2,6 +2,30 @@
 
 Append concise entries in reverse chronological order. Record verified outcomes, not intentions.
 
+## 2026-11-24 — SSRF-Hardened Live Fundamentals & Financial News Ingestion Adapters (ADR-041)
+- Implemented ADR-041 adding SSRF-hardened live fundamentals and financial news ingestion adapters:
+  - **SSRF-Hardened Context Adapter (`context_bridge.py`)**:
+    - Created `ReadOnlyContextBridge` supporting `"synthetic"`, `"cache"`, and `"live"` modes.
+    - SSRF defenses: HTTPS scheme enforcement, allowlisted Yahoo Finance hosts (`query1/query2/feeds.finance.yahoo.com`), `_NoRedirectHandler` (raising `URLError` on 3xx), 512 KB payload cap, 10s socket timeout, and symbol validation regex (`^[A-Za-z0-9._-]{1,32}$`).
+    - XML/RSS XXE protection: scanning for `<!DOCTYPE` and `<!ENTITY` (case-insensitive) prior to XML parsing, control character filtering, entity decoding via `html.unescape`, and HTML tag stripping.
+    - HMAC-SHA256 authenticated disk caching with tamper detection.
+  - **Desk & Orchestrator Integration (`state.py`, `schemas.py`, `routes.py`)**:
+    - Extended `DeskRunRequest` with `context_source: Literal["synthetic", "cache", "live"] = "synthetic"`.
+    - Resolved real `FundamentalSnapshot`, `NewsArticle`s, and `ScheduledEvent`s outside locks and passed into `WatchlistTarget`.
+    - Enabled `DataAnalyst` and `NewsAnalyst` to output `data_quality="ok"` and genuine fundamental/catalyst evaluations.
+    - Automatically enforced `EVENT_BLACKOUT` and rejected proposals when upcoming earnings date falls within window (`<= 2 days`).
+    - Added `GET /api/context/{exchange}/{symbol}` endpoint returning sanitized fundamental metrics, news headlines, and blackout status with `paper_only: True`.
+  - **Dashboard Settings & Badges (`dashboard.py`)**:
+    - Added Context Source dropdown inside `Settings ▾` (`#contextSourceSelect`).
+    - Added Context pill inside Cycle Strip (`#cycleContextPill`).
+    - Added `Fundamental Health & Catalyst Summary` card in Overview tab (`#overviewContextContainer`).
+    - Added live Fundamental and Catalyst evaluation badges in Agent Chat cards.
+    - Preserved zero external CDN dependencies and safe DOM construction via `document.createElement`.
+  - **Testing & Verification**:
+    - Added `tests/test_m10_fundamentals_and_news.py` with 8 comprehensive adversarial tests.
+    - Zero inline `#` comments verified across all new and modified code.
+
+
 ## 2026-11-24 — Auto-Buy Toggle, AI Buy/Sell Price Plan Cards & Candlestick Chart with AI Overlays (ADR-038)
 - Implemented ADR-038 adding Auto-Buy toggle control, AI Buy & Sell Price Plan cards, and interactive HTML5 `<canvas>` Candlestick Chart with AI Overlays:
   - **Conditional Order Execution & Plan Status (`orchestrator.py`)**:

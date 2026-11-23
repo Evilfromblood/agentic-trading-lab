@@ -11,6 +11,7 @@ from agentic_trading.api.schemas import (
     BacktestRequest,
     BacktestResponse,
     ClosePositionRequest,
+    ContextResponse,
     CycleDetailResponse,
     CycleSummaryItem,
     DecisionRecordItem,
@@ -196,6 +197,40 @@ def get_feed_candles(
             symbol_str=sym_clean,
             source=source,
             bars=bars,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/context/{exchange}/{symbol}", response_model=ContextResponse)
+def get_context(
+    exchange: str,
+    symbol: str,
+    state: Annotated[TradingLabState, Depends(get_lab_state)],
+    source: Literal["synthetic", "cache", "live"] = Query(default="synthetic"),
+) -> ContextResponse:
+    ex_clean = exchange.strip().upper()
+    if ex_clean not in {"NSE", "BSE", "NYSE", "NASDAQ"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported exchange '{exchange}'",
+        )
+    sym_clean = symbol.strip().upper()
+    if (
+        not sym_clean
+        or len(sym_clean) > 32
+        or not re.match(r"^[A-Za-z0-9._-]{1,32}$", sym_clean)
+        or ".." in sym_clean
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="symbol must match ^[A-Za-z0-9._-]{1,32}$ and cannot contain '..'",
+        )
+    try:
+        return state.get_context(
+            exchange_str=ex_clean,
+            symbol_str=sym_clean,
+            source=source,
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

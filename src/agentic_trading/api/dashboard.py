@@ -590,6 +590,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div class="cycle-detail-item"><strong>Market:</strong> <span id="cycleMarketText">—</span></div>
         <div class="cycle-detail-item"><strong>Auto-Buy:</strong> <span id="cycleAutoBuyPill" class="pill pill-blue">—</span></div>
         <div class="cycle-detail-item"><strong>Feed:</strong> <span id="cycleFeedPill" class="pill pill-blue">—</span></div>
+        <div class="cycle-detail-item"><strong>Context:</strong> <span id="cycleContextPill" class="pill pill-blue">—</span></div>
         <div class="cycle-detail-item"><strong>Model:</strong> <span id="cycleModelPill" class="pill pill-purple">—</span></div>
         <div class="cycle-detail-item"><strong>Watchlist:</strong> <span id="cycleWatchlistGroup" class="pill-group"></span></div>
       </div>
@@ -661,6 +662,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           </select>
         </div>
         <div class="setting-group">
+          <label for="contextSourceSelect">Context Source:</label>
+          <select id="contextSourceSelect">
+            <option value="synthetic" selected>Synthetic (Deterministic)</option>
+            <option value="cache">Replay Fixture Cache</option>
+            <option value="live">Live RSS / Public</option>
+          </select>
+        </div>
+        <div class="setting-group">
           <label for="llmBackendSelect">LLM Backend:</label>
           <select id="llmBackendSelect">
             <option value="stub" selected>Deterministic Stub</option>
@@ -702,6 +711,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           <div class="section-title">Risk Gating &amp; Rejections</div>
           <div id="overviewRejections" class="badge-cluster">
             <span style="font-size:0.78rem;color:var(--text-dim);">No rejections</span>
+          </div>
+        </div>
+
+        <div class="card" style="grid-column: 1 / -1;">
+          <div class="section-title">Fundamental Health &amp; Catalyst Summary</div>
+          <div id="overviewContextContainer" class="badge-cluster">
+            <span style="font-size:0.78rem;color:var(--text-dim);">No context data loaded</span>
           </div>
         </div>
       </div>
@@ -991,6 +1007,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       autoBuyPill.className = isAuto ? "pill pill-success" : "pill pill-amber";
 
       document.getElementById("cycleFeedPill").textContent = detail.feed_source;
+      const ctxPill = document.getElementById("cycleContextPill");
+      if (ctxPill) {
+        ctxPill.textContent = detail.context_source || "synthetic";
+      }
       document.getElementById("cycleModelPill").textContent = detail.llm_backend === "ollama" ? detail.ollama_model : detail.llm_backend;
 
       const wlGroup = document.getElementById("cycleWatchlistGroup");
@@ -1456,6 +1476,71 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         rejectionsContainer.appendChild(span);
       }
 
+      const contextContainer = document.getElementById("overviewContextContainer");
+      if (contextContainer) {
+        while (contextContainer.firstChild) contextContainer.removeChild(contextContainer.firstChild);
+        const traceEntries = detail.chat_trace || [];
+        const tickerSymbols = detail.watchlist || [];
+        const byTicker = {};
+        tickerSymbols.forEach(sym => { byTicker[sym] = {}; });
+        traceEntries.forEach(entry => {
+          if (entry.symbol) {
+            if (!byTicker[entry.symbol]) byTicker[entry.symbol] = {};
+            if (entry.agent === "data_analyst") {
+              byTicker[entry.symbol].data = entry.output_message || {};
+            } else if (entry.agent === "news_analyst") {
+              byTicker[entry.symbol].news = entry.output_message || {};
+            }
+          }
+        });
+        const syms = Object.keys(byTicker);
+        if (syms.length > 0) {
+          syms.forEach(sym => {
+            const wrap = document.createElement("div");
+            wrap.style.display = "inline-flex";
+            wrap.style.alignItems = "center";
+            wrap.style.gap = "6px";
+            wrap.style.marginRight = "10px";
+            wrap.style.marginBottom = "6px";
+
+            const symPill = document.createElement("span");
+            symPill.className = "pill pill-slate";
+            symPill.textContent = sym;
+            wrap.appendChild(symPill);
+
+            const dData = byTicker[sym].data || {};
+            const q = dData.quality !== undefined ? dData.quality : "—";
+            const g = dData.growth !== undefined ? dData.growth : "—";
+            const s = dData.safety !== undefined ? dData.safety : "—";
+            const fHealth = document.createElement("span");
+            fHealth.className = "pill pill-blue";
+            fHealth.textContent = "Q:" + q + " G:" + g + " S:" + s;
+            wrap.appendChild(fHealth);
+
+            const nData = byTicker[sym].news || {};
+            const sentVal = nData.net_sentiment !== undefined ? Number(nData.net_sentiment).toFixed(2) : "0.00";
+            const sentPill = document.createElement("span");
+            sentPill.className = "pill " + (Number(sentVal) >= 0 ? "pill-success" : "pill-danger");
+            sentPill.textContent = (Number(sentVal) > 0 ? "+" : "") + sentVal + " Sent";
+            wrap.appendChild(sentPill);
+
+            const isBlk = Boolean(nData.blackout_suggested);
+            const blkPill = document.createElement("span");
+            blkPill.className = "pill " + (isBlk ? "pill-danger" : "pill-success");
+            blkPill.textContent = isBlk ? "EVENT BLACKOUT" : "CATALYST CLEAR";
+            wrap.appendChild(blkPill);
+
+            contextContainer.appendChild(wrap);
+          });
+        } else {
+          const span = document.createElement("span");
+          span.style.fontSize = "0.78rem";
+          span.style.color = "var(--text-dim)";
+          span.textContent = "No context data available for this cycle";
+          contextContainer.appendChild(span);
+        }
+      }
+
       renderTradePlans(detail);
       setupCandlestickChart(detail);
 
@@ -1565,6 +1650,31 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         modelBadge.textContent = entry.model;
         meta.appendChild(modelBadge);
 
+        if (entry.agent === "data_analyst" && entry.output_message) {
+          const out = entry.output_message;
+          const qVal = out.quality !== undefined ? out.quality : 1;
+          const gVal = out.growth !== undefined ? out.growth : 1;
+          const sVal = out.safety !== undefined ? out.safety : 1;
+          const qBadge = document.createElement("span");
+          qBadge.className = "pill pill-blue";
+          qBadge.textContent = "Fundamental: Q" + qVal + " G" + gVal + " S" + sVal;
+          meta.appendChild(qBadge);
+        } else if (entry.agent === "news_analyst" && entry.output_message) {
+          const out = entry.output_message;
+          const sentVal = out.net_sentiment !== undefined ? Number(out.net_sentiment).toFixed(2) : "0.00";
+          const sentBadge = document.createElement("span");
+          sentBadge.className = "pill " + (Number(sentVal) >= 0 ? "pill-success" : "pill-danger");
+          sentBadge.textContent = "Catalyst: " + (Number(sentVal) > 0 ? "+" : "") + sentVal;
+          meta.appendChild(sentBadge);
+
+          if (out.blackout_suggested) {
+            const blkBadge = document.createElement("span");
+            blkBadge.className = "pill pill-danger";
+            blkBadge.textContent = "EVENT BLACKOUT";
+            meta.appendChild(blkBadge);
+          }
+        }
+
         head.appendChild(meta);
         head.appendChild(renderStatusPill(entry.status));
         card.appendChild(head);
@@ -1663,11 +1773,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         return;
       }
       const feedSource = document.getElementById("feedSourceSelect").value;
+      const contextSource = document.getElementById("contextSourceSelect") ? document.getElementById("contextSourceSelect").value : "synthetic";
       const llmBackend = document.getElementById("llmBackendSelect").value;
       const ollamaModel = document.getElementById("ollamaModelInput").value.trim() || "gemma4:12b";
       const autoBuy = document.getElementById("autoBuyToggle").checked;
 
-      showStatus("Initiating 7-Agent Research Desk cycle (" + feedSource + ", auto-buy=" + autoBuy + ")...", false);
+      showStatus("Initiating 7-Agent Research Desk cycle (" + feedSource + " / " + contextSource + ", auto-buy=" + autoBuy + ")...", false);
       try {
         const res = await fetch("/api/desk/run", {
           method: "POST",
@@ -1677,6 +1788,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             exchange: exchange,
             currency: currency,
             feed_source: feedSource,
+            context_source: contextSource,
             llm_backend: llmBackend,
             ollama_model: ollamaModel,
             auto_buy: autoBuy

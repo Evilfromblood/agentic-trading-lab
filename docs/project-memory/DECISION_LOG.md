@@ -702,3 +702,31 @@ Append decisions; do not silently rewrite historical decisions. Mark superseded 
      - Built comprehensive test suite covering concrete strategy library signals, multi-strategy backtest execution and equity curve serialization, open position listing and closing, lessons SQLite persistence across state re-instantiation, and sandbox reset under Kill Switch guards.
      - Maintained strict zero inline `#` comments and zero external CDN script/style references.
 - **Consequences:** Completes the local-first Agentic Trading Lab into an autonomous research workstation with quantitative backtesting, live position control, visual equity analytics, memory-backed human governance, and safe capital reset.
+
+## ADR-041 (SSRF-Hardened Live Fundamentals & Financial News Ingestion Adapters)
+- **Status:** Accepted (2026-11-24)
+- **Context:** While the 7-agent AI research desk possessed structured `DataAnalyst` and `NewsAnalyst` agent schemas, desk cycles ran without live or verified external fundamental filings and financial news feeds, causing analysts to default to `data_quality="missing"`. To empower authentic fundamental evaluations, catalyst sentiment analysis, and automated earnings blackout enforcement without introducing SSRF, XXE, or denial-of-service risks, an isolated, hardened context ingestion adapter was required.
+- **Decisions:**
+  1. **SSRF-Hardened Context Adapter (`src/agentic_trading/market_data/context_bridge.py`):**
+     - Implemented `ReadOnlyContextBridge` providing genuine `FundamentalSnapshot`, `NewsArticle`, and `ScheduledEvent` context data.
+     - **Strict SSRF Defenses:** Enforced HTTPS scheme only, strict hostname allowlist (`query1.finance.yahoo.com`, `query2.finance.yahoo.com`, `feeds.finance.yahoo.com`), custom `_NoRedirectHandler` raising `urllib.error.URLError` on 3xx redirects, 10-second socket timeout, 512 KB payload size cap, and regex symbol validation (`^[A-Za-z0-9._-]{1,32}$`).
+     - **XXE & Content Defenses:** Prior to XML parsing in `parse_rss_xml`, scanned text for `<!DOCTYPE` and `<!ENTITY` (case-insensitive) and failed closed with `ValueError`. Stripped ASCII control characters before `ET.fromstring`. Decoded entities with `html.unescape` and stripped HTML tags via regex.
+     - **Three Deterministic Modes:**
+       - `"synthetic"`: Generates deterministic fundamental ratios (P/E, ROE, debt-to-equity, revenue growth, next earnings date) and curated sector headlines derived from ticker hash seed without network I/O.
+       - `"cache"`: Reads HMAC-SHA256 authenticated cached context payloads from disk with tamper rejection.
+       - `"live"`: Fetches public RSS headlines and quote data over HTTPS with automatic fail-closed fallback to cache or synthetic.
+  2. **Orchestrator, State & Desk Pipeline Integration (`src/agentic_trading/api/{schemas,state,routes}.py`):**
+     - Extended `DeskRunRequest` with `context_source: Literal["synthetic", "cache", "live"] = "synthetic"`.
+     - In `TradingLabState.run_desk`, resolved `ctx_res = self.context_bridge.fetch_context(...)` outside locks, passing real `FundamentalSnapshot`, `NewsArticle`s, and `ScheduledEvent`s into `WatchlistTarget`.
+     - `DataAnalyst` and `NewsAnalyst` evaluate genuine fundamental metrics and catalyst sentiment, outputting `data_quality="ok"`.
+     - In `orchestrator.run_cycle`, when an earnings date falls within the blackout window (`<= 2 days`), `NewsAnalyst` sets `blackout_suggested=True`, and `ProposalGate` enforces `EVENT_BLACKOUT`, setting `max_allowed_quantity = 0`.
+     - Added REST endpoint `GET /api/context/{exchange}/{symbol}` with symbol sanitization, returning `ContextResponse` with `paper_only: True`.
+  3. **Interactive Dashboard UI Encodings (`src/agentic_trading/api/dashboard.py`):**
+     - Added Context Source dropdown inside `Settings ▾` (`#contextSourceSelect`).
+     - Displayed `Context:` status badge inside the Reviewing Cycle Context Strip (`#cycleContextPill`).
+     - Added `Fundamental Health & Catalyst Summary` badge card in the Overview tab (`#overviewContextContainer`).
+     - Added live Quality, Growth, Safety, Sentiment, and Blackout status pills inside the Agent Chat cards.
+     - Strictly maintained zero external CDN links and DOM manipulation via `document.createElement`.
+  4. **Verification & Regression Suite (`tests/test_m10_fundamentals_and_news.py`):**
+     - Added 8 comprehensive adversarial tests covering SSRF blocks, payload caps, XXE and entity expansion rejection, deterministic synthetic and HMAC cache loading, desk run integration with non-missing analyst ratings, earnings blackout enforcement, `/api/context` endpoint, and zero inline `#` comments.
+- **Consequences:** Enables genuine fundamental and news catalyst reasoning for the multi-agent trading desk while maintaining strict defense-in-depth isolation against SSRF, XXE, and prompt injection vectors.

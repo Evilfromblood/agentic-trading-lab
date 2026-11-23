@@ -318,3 +318,31 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 - **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
 - **Secrets:** 0 leaks detected against `.secrets.baseline`.
 - **Inline `#` Comments:** 0 comments in git diff.
+
+---
+
+## 14. Milestone 10 — SSRF-Hardened Live Fundamentals & Financial News Ingestion Adapters (ADR-041), Verified 2026-11-24
+
+**Files:**
+- `src/agentic_trading/market_data/context_bridge.py`
+- `src/agentic_trading/agents/{llm_client.py,memory.py}`
+- `src/agentic_trading/api/{schemas,state,routes,dashboard}.py`
+- `tests/test_m10_fundamentals_and_news.py`
+
+| Area | Component | Behaviour & Hardening | Verification Test |
+|---|---|---|---|
+| Context Bridge | `ReadOnlyContextBridge` | SSRF-hardened fetcher enforcing HTTPS only, host allowlist (`query1/query2/feeds.finance.yahoo.com`), no-redirect urllib opener (`_NoRedirectHandler`), 512 KB payload limit, 10s socket timeout, and symbol regex `^[A-Za-z0-9._-]{1,32}$`. | `test_context_bridge_ssrf_and_symbol_validation`, `test_context_bridge_redirects_and_payload_caps` |
+| XXE & HTML | Content Sanitization | Rejecting `<!DOCTYPE` and `<!ENTITY` prior to `ET.fromstring`, pre-filtering control characters, and stripping HTML tags with `html.unescape`. | `test_context_bridge_xxe_and_html_cleaning` |
+| Context Modes | 3 Deterministic Modes | `"synthetic"` (hash-derived fundamental snapshot and sector news without I/O), `"cache"` (HMAC-SHA256 authenticated disk cache with tamper rejection), and `"live"` (HTTPS RSS and quoteSummary with fail-closed fallback to cache/synthetic). | `test_context_bridge_deterministic_synthetic_and_cache` |
+| Desk Integration | State & Orchestrator | `DeskRunRequest` accepts `context_source: Literal["synthetic", "cache", "live"] = "synthetic"`. `TradingLabState.run_desk` resolves real `FundamentalSnapshot`, `NewsArticle`s, and `ScheduledEvent`s outside locks, enabling `DataAnalyst` and `NewsAnalyst` to output `data_quality="ok"` instead of missing. | `test_desk_run_with_synthetic_context_and_analyst_evaluation` |
+| Risk Engine | `EVENT_BLACKOUT` | Automatic blackout enforcement when scheduled earnings date falls within window (`<= 2 days`), rejecting trade proposal with `EVENT_BLACKOUT` and `max_allowed_quantity = 0`. | `test_desk_run_earnings_blackout_enforcement` |
+| REST API | `/api/context` Endpoint | `GET /api/context/{exchange}/{symbol}` endpoint returning sanitized fundamentals, articles, scheduled events, and blackout status with `paper_only: True`. | `test_get_context_endpoint_and_dashboard_elements` |
+| Dashboard UI | Settings & Badges | Added Context Source selector inside `Settings ▾`, `Fundamental Health & Catalyst Summary` badges in Overview, and Fundamental/Catalyst status pills in Agent Chat. Zero external CDNs and safe DOM creation. | `test_get_context_endpoint_and_dashboard_elements` |
+| Hygiene | Zero Inline Comments | Automated AST and tokenizer test verifying 0 inline `#` comments across all modified/new files. | `test_m10_sources_and_tests_have_zero_inline_comments` |
+
+### Suite Verification:
+- **Pytest:** 515 passed in 14.82s on Python 3.11 (`.venv311`), 515 passed in 11.95s on Python 3.14 (`.venv`).
+- **Coverage:** **88.37%** (exceeds mandatory `--cov-fail-under=85`).
+- **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
+- **Secrets:** 0 leaks detected against `.secrets.baseline`.
+- **Inline `#` Comments:** 0 comments in git diff.

@@ -28,20 +28,25 @@ from agentic_trading.api.schemas import (
     BacktestResponse,
     CandleBarItem,
     ClosePositionRequest,
+    ContextResponse,
     CycleDetailResponse,
     CycleSummaryItem,
     DecisionRecordItem,
     DeskRunRequest,
     DeskRunResponse,
     FeedCandlesResponse,
+    FundamentalSnapshotItem,
+    NewsArticleItem,
     OrderResponse,
     PortfolioSummaryResponse,
     PositionItem,
     PositionsListResponse,
     PositionSummary,
+    ScheduledEventItem,
     SubmitOrderRequest,
     TradePlanItem,
 )
+from agentic_trading.market_data.context_bridge import ReadOnlyContextBridge
 from agentic_trading.market_data.feed_bridge import ReadOnlyMarketFeedBridge
 from agentic_trading.market_data.instruments import (
     Currency,
@@ -156,6 +161,10 @@ class TradingLabState:
         )
         self.fixture_dir = Path(fixture_dir) if fixture_dir else Path.cwd() / "data" / "replay_fixtures"
         self.feed_bridge = ReadOnlyMarketFeedBridge(cache_dir=self.fixture_dir)
+        self.context_bridge = ReadOnlyContextBridge(
+            cache_dir=self.fixture_dir,
+            hmac_key=self.feed_bridge.hmac_key,
+        )
 
         deposit_time = datetime(2025, 1, 1, 0, 0, tzinfo=timezone.utc)
         self.inr_portfolio = PortfolioEngine(
@@ -652,14 +661,20 @@ class TradingLabState:
             with self._lock:
                 self._mark_prices[(exchange, sym)] = Money(bars[-1].close, currency)
 
+            ctx_res = self.context_bridge.fetch_context(
+                exchange=exchange,
+                symbol=sym,
+                as_of=as_of,
+                mode=request.context_source,
+            )
             watchlist_targets.append(
                 WatchlistTarget(
                     instrument=instrument,
                     current_candle=bars[-1],
                     context=context,
-                    fundamental_snapshot=None,
-                    news_articles=(),
-                    scheduled_events=(),
+                    fundamental_snapshot=ctx_res.snapshot,
+                    news_articles=ctx_res.articles,
+                    scheduled_events=ctx_res.scheduled_events,
                 )
             )
 
@@ -721,6 +736,7 @@ class TradingLabState:
             "currency": request.currency,
             "watchlist": request.watchlist,
             "feed_source": request.feed_source,
+            "context_source": request.context_source,
             "llm_backend": request.llm_backend,
             "ollama_model": request.ollama_model,
             "auto_buy": request.auto_buy,
@@ -751,6 +767,7 @@ class TradingLabState:
             reconciled=result.reconciliation.is_reconciled,
             llm_backend=request.llm_backend,
             feed_source=request.feed_source,
+            context_source=request.context_source,
             timestamp=as_of,
             watchlist=request.watchlist,
             ollama_model=request.ollama_model,
@@ -772,6 +789,7 @@ class TradingLabState:
                         currency=r["currency"],
                         watchlist=list(r["watchlist"]),
                         feed_source=r["feed_source"],
+                        context_source=r.get("context_source", "synthetic"),
                         llm_backend=r["llm_backend"],
                         ollama_model=r["ollama_model"],
                         approved_count=r["approved_count"],
@@ -813,6 +831,7 @@ class TradingLabState:
                 currency=data["currency"],
                 watchlist=list(data["watchlist"]),
                 feed_source=data["feed_source"],
+                context_source=data.get("context_source", "synthetic"),
                 llm_backend=data["llm_backend"],
                 ollama_model=data["ollama_model"],
                 shortlist=list(data["shortlist"]),
@@ -870,6 +889,63 @@ class TradingLabState:
                 warnings=list(res.warnings),
                 candles=candles,
             )
+
+    def get_context(
+        self,
+        exchange_str: str,
+        symbol_str: str,
+        source: str = "synthetic",
+    ) -> ContextResponse:
+        ex = Exchange(exchange_str.strip().upper())
+        sym = symbol_str.strip().upper()
+        curr = "INR" if ex in {Exchange.NSE, Exchange.BSE} else "USD"
+        res = self.context_bridge.fetch_context(
+            exchange=ex,
+            symbol=sym,
+            mode=source,
+        )
+        snap_item = FundamentalSnapshotItem(
+            symbol=res.snapshot.symbol,
+            as_of_filing=res.snapshot.as_of_filing.isoformat(),
+            revenue_growth_yoy=res.snapshot.revenue_growth_yoy,
+            operating_margin=res.snapshot.operating_margin,
+            fcf_margin=res.snapshot.fcf_margin,
+            debt_to_equity=res.snapshot.debt_to_equity,
+            interest_coverage=res.snapshot.interest_coverage,
+            pe_vs_peer_median=res.snapshot.pe_vs_peer_median,
+            dilution_yoy=res.snapshot.dilution_yoy,
+            peer_set=list(res.snapshot.peer_set),
+        )
+        art_items = [
+            NewsArticleItem(
+                headline=a.headline,
+                source=a.source,
+                source_tier=a.source_tier,
+                published_at=a.published_at.isoformat(),
+                summary=a.summary,
+            )
+            for a in res.articles
+        ]
+        evt_items = [
+            ScheduledEventItem(
+                event_name=e.event_name,
+                event_date=e.event_date.isoformat(),
+                event_type=e.event_type,
+            )
+            for e in res.scheduled_events
+        ]
+        return ContextResponse(
+            paper_only=True,
+            symbol=sym,
+            exchange=ex.value,
+            currency=curr,
+            source=res.source,
+            is_blackout=res.is_blackout,
+            snapshot=snap_item,
+            articles=art_items,
+            scheduled_events=evt_items,
+            warnings=list(res.warnings),
+        )
 
     def get_decisions(self, run_id: str | None = None) -> list[DecisionRecordItem]:
         with self._lock:

@@ -1,6 +1,6 @@
 # Next Actions
 
-Current priority: ADR-038 (Auto-Buy Toggle, AI Buy/Sell Price Plan Cards & Candlestick Chart with AI Overlays) is complete and verified. All milestones (M2a through M7, RC1, RC2, ADR-037, and ADR-038) are implemented, tested, and verified across Python 3.11 and Python 3.14.
+Current priority: ADR-041 (SSRF-Hardened Live Fundamentals & Financial News Ingestion Adapters) is complete and verified. All milestones (M2a through M10, RC1, RC2, ADR-037 through ADR-041) are implemented, tested, and verified across Python 3.11 and Python 3.14. Tag `v1.2.0` ready.
 
 ## Immediate sequence
 1. Baseline M2a committed (`1b7e582`) and pushed to `origin/feature/reliable-foundation`.
@@ -62,6 +62,7 @@ Current priority: ADR-038 (Auto-Buy Toggle, AI Buy/Sell Price Plan Cards & Candl
 11. Abstracted Dashboard & Agent Chat Trace (ADR-037): Cycle selector, 4-stage chat stream, 495 tests passing.
 12. Auto-Buy Toggle, Trade Plans & Candlestick Chart (ADR-038): Plan preview, canvas candlestick overlays, 500 tests passing.
 13. Complete Workstation Upgrade (ADR-039): Strategy library (`ema_pullback`, `rsi_mean_reversion`, `atr_breakout`, `sma_cross`), open positions listing & liquidation (`/api/positions`, `/api/positions/close`), visual backtest equity curve with mousemove crosshair (`/api/backtest`), SQLite trading lessons manager (`/api/lessons`), safeguarded paper sandbox reset (`/api/sandbox/reset`), 507 tests passing with 88.35% coverage across Python 3.11 and Python 3.14. Tag `v1.0.0` ready.
+14. SSRF-Hardened Live Fundamentals & Financial News Ingestion Adapters (ADR-041): `ReadOnlyContextBridge` supporting `"synthetic"`, `"cache"`, and `"live"` modes; XML XXE entity/doctype defense; real fundamental ratios and sector news fed into `DataAnalyst` and `NewsAnalyst` with `data_quality="ok"`; automated earnings blackout enforcement (`EVENT_BLACKOUT`); `GET /api/context/{exchange}/{symbol}` endpoint; Context Source selector and Fundamental/Catalyst badges in Dashboard UI; 515 tests passing with 88.37% coverage across Python 3.11 and Python 3.14. Tag `v1.2.0` ready.
 
 ## Review/remediation loop
 Claude independent verification -> ChatGPT triage and scoped technical direction -> Antigravity implementation and regression tests -> independent verification of the new snapshot. Avoid overlapping audits of unchanged code when a focused remediation cycle is more efficient.
