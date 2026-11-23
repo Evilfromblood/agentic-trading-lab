@@ -666,3 +666,39 @@ Append decisions; do not silently rewrite historical decisions. Mark superseded 
   5. **Regression Verification (`tests/test_m6_api_and_dashboard.py`, `tests/test_e2e_platform_audit.py`):**
      - Added regression tests verifying `auto_buy=False` non-execution and planned status, manual paper buy order execution from plan parameters, `auto_buy=True` automatic execution, candle feed serialization, canvas chart DOM elements, and zero inline `#` comments.
 - **Consequences:** Provides human operators with discretionary control to review and confirm AI trade brackets before paper capital is deployed, while enhancing market situational awareness through native candlestick visualization.
+
+## ADR-039 (Complete Workstation Upgrade: Strategy Library, Open Positions Close, Visual Backtest Equity Curve, Lessons Manager & Safeguarded Sandbox Reset)
+- **Status:** Accepted (2026-11-24)
+- **Context:** To finalize the local-first Agentic Trading Lab into a fully integrated, operator-ready trading research workstation, several critical operational capabilities were needed on top of ADR-038: a pluggable concrete strategy library for the Time Machine backtesting engine, live open portfolio position tracking with one-click position closing, an interactive visual backtest equity curve with mousemove crosshair inspection, persistent operator trading lessons injected into agent reasoning, and a safeguarded sandbox reset capability.
+- **Decisions:**
+  1. **Concrete Strategy Library (`src/agentic_trading/strategy/library.py` & `__init__.py`):**
+     - Implemented `EMAPullbackStrategy` (`ema_pullback`): fast EMA(9) > slow EMA(21) with pullback tolerance (`fast_val * 1.015`), ATR(14)-based stop loss (`1.5 * ATR`) and profit target (`3.0 * ATR`).
+     - Implemented `RSIMeanReversionStrategy` (`rsi_mean_reversion`): Wilder RSI(14) oversold entry (`RSI <= 32`), stop loss (`1.5 * ATR`), target (`2.5 * ATR`), and overbought exit (`RSI >= 70`).
+     - Implemented `ATRBreakoutStrategy` (`atr_breakout`): Donchian 20-bar channel high breakout with expanding ATR volatility.
+     - Implemented `SmaCrossStrategy` (`sma_cross`): Deterministic 5/15 SMA crossover strategy.
+     - Centralized `STRATEGY_REGISTRY` mapping `"ema_pullback"`, `"rsi_mean_reversion"`, `"atr_breakout"`, and `"sma_cross"`, exported through `src/agentic_trading/strategy/__init__.py`.
+  2. **Strategy-Selectable Backtest & Visual Equity Curve (`src/agentic_trading/api/{schemas.py,state.py,routes.py,dashboard.py}`):**
+     - Extended `BacktestRequest` with `strategy_name: str = "ema_pullback"`, validated against allowed strategy keys.
+     - Extended `BacktestResponse` with `strategy_name: str` and `equity_curve: list[dict[str, str]]`.
+     - Time Machine `BacktestResult.equity_curve` serialized to `list[dict[str, str]]` preserving `timestamp`, `cash`, `holdings_value`, `total_equity`, and `drawdown_pct`.
+     - Built dedicated `Backtest` tab in Dashboard UI with Strategy dropdown, KPI summary cards (Net Return %, Sharpe Ratio, Max Drawdown %, Win Rate %, Trades Count, Monte Carlo 95% VaR, Profit Factor, Expectancy, Bars Evaluated, HMAC verification badge), and native `<canvas id="equityCurveCanvas">` visual line chart with green accent stroke, translucent area fill, and interactive mousemove crosshair inspection with hover readout bar (`#equityCurveReadoutBar`).
+  3. **Open Portfolio Positions & One-Click Sell (`src/agentic_trading/api/{schemas.py,state.py,routes.py,dashboard.py}`):**
+     - Added `PositionItem` and `PositionsListResponse` schemas with `extra="forbid"`.
+     - Added endpoint `GET /api/positions` returning open holdings across INR and USD paper portfolios with average cost, current mark price, market value, and unrealized P&L.
+     - Added `ClosePositionRequest` schema and endpoint `POST /api/positions/close`.
+     - Position closing validates open quantity, fetches latest feed mark price, creates market SELL trade proposal, executes through `PaperBroker.submit_order(side="SELL")`, records realized P&L, updates cash, reduces position to 0, and preserves `Decimal("0")` conservation residual.
+     - Built dedicated `Positions` tab in Dashboard UI with full positions table and interactive `Sell / Close` button for instant liquidation.
+  4. **Persistent SQLite Trading Lessons Manager (`src/agentic_trading/agents/memory.py` & `src/agentic_trading/api/{schemas.py,routes.py,dashboard.py}`):**
+     - Extended `HumanLessonsStore` with optional `db_path: Path | None`. When configured, creates `lessons` table (`id INTEGER PRIMARY KEY`, `lesson TEXT UNIQUE`, `created_at TEXT`), provides thread-safe `add_lesson(lesson: str)` and `load_lessons() -> tuple[str, ...]`.
+     - Added `AddLessonRequest` and `LessonsListResponse` schemas.
+     - Added endpoints `GET /api/lessons` and `POST /api/lessons`.
+     - Built dedicated `Lessons` tab in Dashboard UI with rule count badges, interactive rule submission form, and persistent rule list injected directly into Strategist and Risk Guardian prompts.
+  5. **Safeguarded Paper Sandbox Reset (`src/agentic_trading/api/{schemas.py,state.py,routes.py,dashboard.py}`):**
+     - Added `ResetSandboxRequest` and `ResetSandboxResponse` schemas.
+     - Added endpoint `POST /api/sandbox/reset`.
+     - When invoked, validates Kill Switch (returns 409 if active), resets INR portfolio cash to 1,000,000, USD portfolio cash to 25,000, clears open positions and mark price caches, and reinstantiates fresh paper brokers under mutual exclusion lock.
+     - Added subtle `Reset Sandbox` button in Dashboard header with client-side modal confirmation.
+  6. **Workstation Regression Suite (`tests/test_m8_workstation_features.py`):**
+     - Built comprehensive test suite covering concrete strategy library signals, multi-strategy backtest execution and equity curve serialization, open position listing and closing, lessons SQLite persistence across state re-instantiation, and sandbox reset under Kill Switch guards.
+     - Maintained strict zero inline `#` comments and zero external CDN script/style references.
+- **Consequences:** Completes the local-first Agentic Trading Lab into an autonomous research workstation with quantitative backtesting, live position control, visual equity analytics, memory-backed human governance, and safe capital reset.

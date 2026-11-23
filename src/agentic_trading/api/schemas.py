@@ -1,6 +1,7 @@
 """Pydantic v2 schemas for local-first paper trading API and web dashboard."""
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal
@@ -194,6 +195,18 @@ class BacktestRequest(BaseModel):
     random_seed: int = Field(default=42, ge=0)
     monte_carlo_runs: int = Field(default=500, ge=1, le=5000)
     feed_source: Literal["synthetic", "cache", "delayed_feed"] = "synthetic"
+    strategy_name: str = Field(default="ema_pullback", max_length=64)
+
+    @field_validator("strategy_name")
+    @classmethod
+    def validate_strategy_name(cls, v: str) -> str:
+        clean = v.strip().lower() if isinstance(v, str) else ""
+        if not clean:
+            raise ValueError("strategy_name must be non-empty")
+        allowed = {"ema_pullback", "rsi_mean_reversion", "atr_breakout", "sma_cross"}
+        if clean not in allowed:
+            raise ValueError(f"Unknown strategy_name '{v}'; supported: {sorted(allowed)}")
+        return clean
 
     @field_validator("symbol")
     @classmethod
@@ -238,6 +251,8 @@ class BacktestResponse(BaseModel):
     trade_count: int
     conservation_residual: Decimal
     feed_source: str = Field(default="synthetic", max_length=64)
+    strategy_name: str = Field(default="ema_pullback", max_length=64)
+    equity_curve: list[dict[str, str]] = []
     paper_only: Literal[True] = True
 
 
@@ -432,3 +447,78 @@ class FeedCandlesResponse(BaseModel):
     latest_timestamp: datetime
     warnings: list[str] = []
     candles: list[CandleBarItem] = []
+
+
+class PositionItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    currency: str = Field(min_length=3, max_length=3)
+    exchange: str = Field(min_length=1, max_length=16)
+    symbol: str = Field(min_length=1, max_length=32)
+    quantity: int
+    average_cost: Decimal
+    mark_price: Decimal
+    market_value: Decimal
+    unrealized_pnl: Decimal
+    unrealized_pnl_pct: Decimal
+
+
+class PositionsListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    paper_only: Literal[True] = True
+    positions: list[PositionItem] = []
+
+
+class ClosePositionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    currency: Literal["INR", "USD"]
+    exchange: Literal["NSE", "BSE", "NYSE", "NASDAQ"]
+    symbol: str = Field(min_length=1, max_length=32)
+
+    @field_validator("symbol")
+    @classmethod
+    def validate_symbol(cls, v: str) -> str:
+        clean = v.strip().upper() if isinstance(v, str) else ""
+        if not clean or len(clean) > 32 or ".." in clean or not re.match(r"^[A-Za-z0-9._-]{1,32}$", clean):
+            raise ValueError("symbol must match ^[A-Za-z0-9._-]{1,32}$ and cannot contain '..'")
+        return clean
+
+
+class AddLessonRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    lesson: str = Field(min_length=1, max_length=240)
+
+    @field_validator("lesson")
+    @classmethod
+    def validate_lesson(cls, v: str) -> str:
+        clean = " ".join(v.strip().split()) if isinstance(v, str) else ""
+        clean = "".join(ch for ch in clean if ord(ch) >= 32 or ch in "\n\t")
+        if not clean:
+            raise ValueError("lesson cannot be empty")
+        if len(clean) > 240:
+            raise ValueError("lesson must be at most 240 characters")
+        return clean
+
+
+class LessonsListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    paper_only: Literal[True] = True
+    lessons: list[str] = []
+
+
+class ResetSandboxRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirm: Literal[True] = True
+
+
+class ResetSandboxResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: str = "ok"
+    message: str = "Sandbox reset successfully"
+    paper_only: Literal[True] = True

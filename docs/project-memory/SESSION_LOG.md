@@ -901,3 +901,18 @@ Append concise entries in reverse chronological order. Record verified outcomes,
 - **Environment limits:** work done in a Linux Python 3.12 sandbox from `full-project-m3-final-bundle.zip` (SHA-256 `e3d4693cfe09b812985952ee75396601f450acea4c99392491a42dd35a1d6b5b`, verified). No git metadata, no `.venv311` / `.venv`, no network.
 - **Evidence:** 25/25 M4 tests pass under a minimal local `pytest` stand-in; 9/9 deliberate mutations detected; `compileall -q src tests v3-zerodha/src` clean on 3.12; zero `#` comment tokens in new Python files (asserted by test).
 - **Not run:** Ruff, real pytest, full-suite regression, coverage gate, detect-secrets, Python 3.11/3.14 runs.
+
+## 2026-11-24 — Session: Milestone 8 Workstation Upgrade (ADR-038 & ADR-039) & Release v1.0.0
+- **Scope:**
+  - Implemented ADR-038: Auto-Buy Toggle, AI Buy/Sell Price Plan Cards, and HTML5 `<canvas id="candlestickCanvas">` Candlestick Chart with AI Overlays.
+  - Implemented ADR-039: Concrete Strategy Library (`src/agentic_trading/strategy/library.py` and `__init__.py` with `EMAPullbackStrategy`, `RSIMeanReversionStrategy`, `ATRBreakoutStrategy`, `SmaCrossStrategy`, and `STRATEGY_REGISTRY`), Open Positions tracking (`GET /api/positions`) & One-Click Sell liquidation (`POST /api/positions/close`), Strategy-selectable Time Machine backtesting with visual line chart `<canvas id="equityCurveCanvas">` (`POST /api/backtest`), SQLite-backed Trading Lessons Manager (`GET /api/lessons`, `POST /api/lessons`), and Safeguarded Paper Sandbox Reset (`POST /api/sandbox/reset`).
+  - Extended local single-page dashboard (`src/agentic_trading/api/dashboard.py`) with Reset Sandbox button in header, Strategy dropdown beside Run Backtest, and 3 new tabs (`Positions`, `Backtest`, `Lessons`) rendered strictly via `document.createElement` and `textContent`.
+  - Added comprehensive regression suite `tests/test_m8_workstation_features.py` (7 tests).
+- **Verification Evidence:**
+  - Full pytest suite: **507 passed in 15.68s** on Python 3.11.9 (`.venv311`) and **507 passed in 12.69s** on Python 3.14.4 (`.venv`).
+  - Total test coverage: **88.35%** (exceeds mandatory 85% requirement with `--cov-fail-under=85`).
+  - Ruff check: clean (0 errors) across `src/`, `tests/`, and `v3-zerodha/src/`.
+  - Python compileall: clean (0 errors) on both Python 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` clean (0 leaks).
+  - Comment check: verified 0 `#` comment characters across all new and edited Python code and tests.
+  - Import boundaries check: all domain boundary invariant tests passed cleanly.

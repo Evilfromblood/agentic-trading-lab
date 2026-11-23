@@ -129,8 +129,7 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 - **Coverage:** **88.54%** (exceeds `--cov-fail-under=85`).
 - **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
 - **Secrets:** 0 leaks detected against `.secrets.baseline` (scanning `requirements.lock`).
-- **Inline `#` Comments:** 0 comments in git diff.
----
+- **Inline `#` Comments:** 0 comments in git diff.---
 
 ## 7. Milestone 5 — Paper Trading Engine & 7-Agent AI Research Desk (ADR-028 & ADR-029 Hardened), Verified 2026-11-23
 
@@ -159,8 +158,7 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 - **Coverage:** **87.91%** (exceeds mandatory `--cov-fail-under=85`).
 - **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
 - **Secrets:** 0 leaks detected against `.secrets.baseline` (scanning `requirements.lock`).
-- **Inline `#` Comments:** 0 comments in git diff.
----
+- **Inline `#` Comments:** 0 comments in git diff.---
 
 ## 8. Milestone 6 — Local-First FastAPI Backend & Interactive Web Dashboard (ADR-030 & ADR-031 Hardened), Verified 2026-11-23
 
@@ -181,8 +179,7 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 - **Coverage:** **88.17%** (exceeds `--cov-fail-under=85`).
 - **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
 - **Secrets:** 0 leaks detected against `.secrets.baseline`.
-- **Inline `#` Comments:** 0 comments in git diff.
----
+- **Inline `#` Comments:** 0 comments in git diff.---
 
 ## 9. Milestone 7 — Read-Only Market Feed Bridge, HMAC Replay Cache & Loopback Ollama Desk Integration (ADR-032 & ADR-033 Hardened), Verified 2026-11-23
 
@@ -211,8 +208,7 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 - **Coverage:** **88.36%** (exceeds mandatory `--cov-fail-under=85`).
 - **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
 - **Secrets:** 0 leaks detected against `.secrets.baseline`.
-- **Inline `#` Comments:** 0 comments in git diff.
----
+- **Inline `#` Comments:** 0 comments in git diff.---
 
 ## 10. Dashboard UI Simplification & Human-Readable Desk Summary Formatting (ADR-034), Verified 2026-11-23
 
@@ -234,8 +230,7 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 - **Coverage:** **88.33%** (exceeds mandatory `--cov-fail-under=85`).
 - **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
 - **Secrets:** 0 leaks detected against `.secrets.baseline`.
-- **Inline `#` Comments:** 0 comments in git diff.
----
+- **Inline `#` Comments:** 0 comments in git diff.---
 
 ## 11. End-to-End Platform Audit & Release Sign-Off (ADR-035), Verified 2026-11-23
 
@@ -266,8 +261,7 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 - **Coverage:** **88.33%** (exceeds mandatory `--cov-fail-under=85`).
 - **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
 - **Secrets:** 0 leaks detected against `.secrets.baseline`.
-- **Inline `#` Comments:** 0 comments in git diff.
----
+- **Inline `#` Comments:** 0 comments in git diff.---
 
 ## 12. RC2 Remediation: Manual Order Risk Gating, Lock-Free Kill Switch, Sequential Snapshots & Cache HMAC Isolation (ADR-036), Verified 2026-11-24
 
@@ -295,6 +289,32 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 ### Suite Verification:
 - **Pytest:** 495 passed in 10.39s on Python 3.11 (`.venv311`), 495 passed in 11.20s on Python 3.14 (`.venv`).
 - **Coverage:** **88.33%** (exceeds mandatory `--cov-fail-under=85`).
+- **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
+- **Secrets:** 0 leaks detected against `.secrets.baseline`.
+- **Inline `#` Comments:** 0 comments in git diff.---
+
+## 13. Milestone 8 Workstation Upgrade: Strategy Library, Positions Close, Backtest Equity Curve, Lessons Manager & Sandbox Reset (ADR-038, ADR-039), Verified 2026-11-24
+
+**Files:**
+- `src/agentic_trading/strategy/library.py`
+- `src/agentic_trading/strategy/__init__.py`
+- `src/agentic_trading/agents/memory.py`
+- `src/agentic_trading/api/{schemas,state,routes,dashboard}.py`
+- `tests/test_m8_workstation_features.py`
+
+| Area | Component | Behaviour & Hardening | Verification Test |
+|---|---|---|---|
+| Strategy Library | `STRATEGY_REGISTRY` | Concrete deterministic quantitative strategies: `EMAPullbackStrategy` (9/21 EMA + ATR brackets), `RSIMeanReversionStrategy` (RSI 32/70 + ATR), `ATRBreakoutStrategy` (Donchian 20 channel), and `SmaCrossStrategy` (5/15 SMA). Exported through `strategy/__init__.py`. | `test_strategy_library_direct_evaluation_and_registry`, `test_backtest_with_different_strategies_and_equity_curve` |
+| Positions | Open Holdings & Close | `GET /api/positions` returns open positions with average cost, mark price, market value, and unrealized P&L. `POST /api/positions/close` submits market SELL order at current feed mark price, validates open quantity, records realized P&L, sets quantity to 0, and preserves `Decimal("0")` conservation residual. Blocked by Kill Switch (HTTP 409). | `test_positions_list_and_close_position` |
+| Backtesting | Visual Equity Curve | `BacktestRequest` accepts `strategy_name: str = "ema_pullback"`. `BacktestResponse` returns `strategy_name` and `equity_curve: list[dict[str, str]]` with timestamp, cash, holdings, total equity, and drawdown %. Dashboard renders interactive `<canvas id="equityCurveCanvas">` with green stroke, area fill, and mousemove hover crosshair. | `test_backtest_with_different_strategies_and_equity_curve`, `test_dashboard_ui_m8_elements_and_hygiene` |
+| Lessons | SQLite Persistence | `HumanLessonsStore` extended with SQLite `lessons` table (`id`, `lesson`, `created_at`). `GET /api/lessons` and `POST /api/lessons` manage persistent rules injected directly into Strategist and Risk Guardian agent reasoning. | `test_lessons_store_sqlite_persistence_and_orchestrator` |
+| Sandbox | Safeguarded Reset | `POST /api/sandbox/reset` restores INR portfolio to 1,000,000 and USD portfolio to 25,000, clears open positions and mark price cache under lock. Blocked by Kill Switch (HTTP 409). | `test_sandbox_reset` |
+| Dashboard | Operator UI | Added subtle Reset Sandbox header button, Strategy selector beside Run Backtest, and 3 new tabs (`Positions`, `Backtest`, `Lessons`). All dynamic DOM constructed strictly via `document.createElement` and `textContent`. Zero external CDN scripts or stylesheet links. | `test_dashboard_ui_m8_elements_and_hygiene` |
+| Hygiene | Zero Inline Comments | Automated tokenizer verification enforcing 0 inline `#` comments in all new and edited Python/JS code. | `test_no_inline_comments_in_workstation_test_file` |
+
+### Suite Verification:
+- **Pytest:** 507 passed in 15.68s on Python 3.11 (`.venv311`), 507 passed in 12.69s on Python 3.14 (`.venv`).
+- **Coverage:** **88.35%** (exceeds mandatory `--cov-fail-under=85`).
 - **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
 - **Secrets:** 0 leaks detected against `.secrets.baseline`.
 - **Inline `#` Comments:** 0 comments in git diff.

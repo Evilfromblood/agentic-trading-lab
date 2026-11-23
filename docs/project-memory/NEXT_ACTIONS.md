@@ -58,7 +58,10 @@ Current priority: ADR-038 (Auto-Buy Toggle, AI Buy/Sell Price Plan Cards & Candl
    - Comprehensive end-to-end integration test (`tests/test_e2e_platform_audit.py`) exercising the complete platform lifecycle in a single test flow.
    - Dual-Python verification: 490 passed across Python 3.11 and Python 3.14 with 88.33% coverage.
    - Packaged and frozen release bundle: `full-project-rc1-bundle.zip`.
-10. Next: Independent external adversarial verification of RC1 package, followed by live market feed paper trading experiments.
+10. Release Candidate 2 (RC2 Remediation — ADR-036): All 8 audit findings resolved; 493 tests passing.
+11. Abstracted Dashboard & Agent Chat Trace (ADR-037): Cycle selector, 4-stage chat stream, 495 tests passing.
+12. Auto-Buy Toggle, Trade Plans & Candlestick Chart (ADR-038): Plan preview, canvas candlestick overlays, 500 tests passing.
+13. Complete Workstation Upgrade (ADR-039): Strategy library (`ema_pullback`, `rsi_mean_reversion`, `atr_breakout`, `sma_cross`), open positions listing & liquidation (`/api/positions`, `/api/positions/close`), visual backtest equity curve with mousemove crosshair (`/api/backtest`), SQLite trading lessons manager (`/api/lessons`), safeguarded paper sandbox reset (`/api/sandbox/reset`), 507 tests passing with 88.35% coverage across Python 3.11 and Python 3.14. Tag `v1.0.0` ready.
 
 ## Review/remediation loop
 Claude independent verification -> ChatGPT triage and scoped technical direction -> Antigravity implementation and regression tests -> independent verification of the new snapshot. Avoid overlapping audits of unchanged code when a focused remediation cycle is more efficient.

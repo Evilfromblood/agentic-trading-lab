@@ -50,6 +50,9 @@ The working tree has local M2b modifications for the market data ingestion found
 - `tests/test_m7_feeds_and_ollama.py` (M7: 11 comprehensive adversarial tests covering SSRF blocks, payload caps, non-finite constant rejection, HMAC cache tamper detection, loopback Ollama validation, failover client resilience, feed endpoint execution, and zero inline comments)
 - `docs/project-memory/AI_MASTER_CONTEXT.md` (reconciled master architectural context, product vision, 3 signature capabilities, 5-phase roadmap, and non-negotiable rules)
 - `requirements.lock` (pinned dependency specification with exact verified pins: `kiteconnect==5.2.2`, `keyring==25.7.0`, `requests==2.34.2`, `ruff==0.17.3`, `pytest==9.2.0`, `pytest-cov==7.1.0`, `detect-secrets==1.5.0`)
+- `src/agentic_trading/strategy/library.py` & `src/agentic_trading/strategy/__init__.py` (M8: concrete deterministic strategy library: `EMAPullbackStrategy`, `RSIMeanReversionStrategy`, `ATRBreakoutStrategy`, `SmaCrossStrategy`, and centralized `STRATEGY_REGISTRY`)
+- `src/agentic_trading/api/` & `src/agentic_trading/agents/memory.py` (M8: ADR-038 Auto-Buy toggle, AI Buy/Sell price plan cards, canvas candlestick chart with AI overlays; ADR-039 open positions listing `/api/positions`, one-click position liquidation `/api/positions/close`, strategy-selectable backtest `/api/backtest` with canvas visual equity curve, SQLite lessons store `/api/lessons`, safeguarded sandbox reset `/api/sandbox/reset`)
+- `tests/test_m8_workstation_features.py` (M8: 7 comprehensive tests covering strategy library evaluation and backtesting, position tracking and liquidation, lessons persistence across restarts, sandbox reset under Kill Switch guards, dashboard elements, and zero inline comments)
 - `tests/test_claude_batch7_regressions.py` (28 regression tests covering closure encapsulation, slot removal, uniform mutation blocking, keyring bypass, D1/M5 ingestion fail-closed `TRUNCATED_COVERAGE` across NSE/BSE/NYSE/NASDAQ, secret scanning of `requirements.lock`, injected client zero-mutation in session/logout, and POST endpoint blocking)
 
 ## Validation evidence
@@ -57,7 +60,8 @@ Verified local Windows virtual environment output:
 - Ruff on `src/`, `tests/`, and `v3-zerodha/src`: passed (`All checks passed!`).
 - Python compileall: `python -m compileall -q src tests v3-zerodha/src` passed with exit code 0 on both 3.11.9 and 3.14.4.
 - `git diff --check`: exit code 0 (no whitespace errors or merge markers).
-- Full pytest suite: **495 passed in 10.39s** on genuine Python 3.11.9 (.venv311) and **495 passed in 11.20s** on Python 3.14.4 (.venv).
+- Detect-secrets hook: passed with 0 detected leaks.
+- Full pytest suite: **507 passed in 15.68s** on genuine Python 3.11.9 (.venv311) and **507 passed in 12.69s** on Python 3.14.4 (.venv) with **88.35% total coverage** (exceeding 85% requirement).
 - Genuine pytest-cov coverage: **88.33%** (exceeding mandatory 85% threshold with `--cov-fail-under=85`).
 - Secret scanning hook: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files, scanning `requirements.lock`.
 - Zero inline `#` comments verified across all audited modules in M4 through M7 (`time_machine/`, `paper_trading/`, `agents/`, `api/`, `feed_bridge.py`) and all new tests (legacy M2a foundation files retain original comments).

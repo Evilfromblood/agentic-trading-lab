@@ -7,8 +7,10 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from agentic_trading.api.schemas import (
+    AddLessonRequest,
     BacktestRequest,
     BacktestResponse,
+    ClosePositionRequest,
     CycleDetailResponse,
     CycleSummaryItem,
     DecisionRecordItem,
@@ -18,8 +20,12 @@ from agentic_trading.api.schemas import (
     HealthResponse,
     KillSwitchRequest,
     KillSwitchResponse,
+    LessonsListResponse,
     OrderResponse,
     PortfolioSummaryResponse,
+    PositionsListResponse,
+    ResetSandboxRequest,
+    ResetSandboxResponse,
     SubmitOrderRequest,
 )
 from agentic_trading.api.state import ProposalRiskRejectionError, TradingLabState
@@ -75,7 +81,6 @@ def get_portfolio(
         return state.get_portfolio_summary(curr)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-
 
 @router.post("/orders", response_model=OrderResponse)
 def submit_order(
@@ -221,3 +226,78 @@ def get_cycle(
     if detail is None:
         raise HTTPException(status_code=404, detail=f"Cycle '{clean_id}' not found")
     return detail
+
+
+@router.get("/positions", response_model=PositionsListResponse)
+def get_positions(
+    state: Annotated[TradingLabState, Depends(get_lab_state)],
+    currency: Literal["INR", "USD"] | None = Query(default=None),
+) -> PositionsListResponse:
+    try:
+        return state.get_positions(currency=currency)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+@router.post("/positions/close", response_model=OrderResponse)
+def close_position(
+    payload: ClosePositionRequest,
+    state: Annotated[TradingLabState, Depends(get_lab_state)],
+) -> OrderResponse:
+    if state.kill_switch.is_active():
+        reason = state.kill_switch.reason() or "Emergency kill switch is active"
+        raise HTTPException(status_code=409, detail=f"Position close rejected: {reason}")
+    try:
+        return state.close_position(payload)
+    except ProposalRiskRejectionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (CurrencyMismatchError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KillSwitchError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/lessons", response_model=LessonsListResponse)
+def get_lessons(
+    state: Annotated[TradingLabState, Depends(get_lab_state)],
+) -> LessonsListResponse:
+    try:
+        return LessonsListResponse(lessons=state.get_lessons())
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+@router.post("/lessons", response_model=LessonsListResponse)
+def add_lesson(
+    payload: AddLessonRequest,
+    state: Annotated[TradingLabState, Depends(get_lab_state)],
+) -> LessonsListResponse:
+    try:
+        state.add_lesson(payload.lesson)
+        return LessonsListResponse(lessons=state.get_lessons())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+@router.post("/sandbox/reset", response_model=ResetSandboxResponse)
+def reset_sandbox(
+    payload: ResetSandboxRequest,
+    state: Annotated[TradingLabState, Depends(get_lab_state)],
+) -> ResetSandboxResponse:
+    if state.kill_switch.is_active():
+        reason = state.kill_switch.reason() or "Emergency kill switch is active"
+        raise HTTPException(status_code=409, detail=f"Sandbox reset rejected: {reason}")
+    try:
+        res = state.reset_sandbox()
+        return ResetSandboxResponse(
+            status=res["status"],
+            message=res["message"],
+            paper_only=res["paper_only"],
+        )
+    except KillSwitchError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

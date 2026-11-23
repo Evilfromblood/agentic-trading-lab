@@ -27,6 +27,7 @@ from agentic_trading.api.schemas import (
     BacktestRequest,
     BacktestResponse,
     CandleBarItem,
+    ClosePositionRequest,
     CycleDetailResponse,
     CycleSummaryItem,
     DecisionRecordItem,
@@ -35,6 +36,8 @@ from agentic_trading.api.schemas import (
     FeedCandlesResponse,
     OrderResponse,
     PortfolioSummaryResponse,
+    PositionItem,
+    PositionsListResponse,
     PositionSummary,
     SubmitOrderRequest,
     TradePlanItem,
@@ -66,6 +69,7 @@ from agentic_trading.strategy.contracts import (
     Strategy,
     TradeProposal,
 )
+from agentic_trading.strategy.library import STRATEGY_REGISTRY
 from agentic_trading.time_machine.engine import (
     BacktestConfig,
     BacktestEngine,
@@ -142,11 +146,13 @@ class TradingLabState:
         self.stop_file = Path(stop_file)
         self.kill_switch = KillSwitch(stop_file=self.stop_file)
         self.db_path = Path(db_path) if db_path else None
+        self.initial_inr_deposit = initial_inr_deposit
+        self.initial_usd_deposit = initial_usd_deposit
         self.decision_log = DecisionLog(db_path=self.db_path)
         self.lessons_store = (
-            HumanLessonsStore.from_file(lessons_path)
+            HumanLessonsStore.from_file(lessons_path, db_path=self.db_path)
             if lessons_path
-            else HumanLessonsStore()
+            else HumanLessonsStore(db_path=self.db_path)
         )
         self.fixture_dir = Path(fixture_dir) if fixture_dir else Path.cwd() / "data" / "replay_fixtures"
         self.feed_bridge = ReadOnlyMarketFeedBridge(cache_dir=self.fixture_dir)
@@ -507,7 +513,14 @@ class TradingLabState:
         )
         candles = list(fetch_res.candles)
 
-        strategy = SmaCrossStrategy(fast=5, slow=15)
+        strat_key = request.strategy_name.strip().lower()
+        if strat_key == "sma_cross":
+            strategy: Strategy = SmaCrossStrategy(fast=5, slow=15)
+        elif strat_key in STRATEGY_REGISTRY:
+            strategy = STRATEGY_REGISTRY[strat_key]()
+        else:
+            raise ValueError(f"Unknown strategy_name '{request.strategy_name}'")
+
         result = self.backtest_engine.run(instrument, candles, strategy, config)
 
         mc_summary = run_seeded_monte_carlo(
@@ -544,6 +557,15 @@ class TradingLabState:
             "probability_of_ruin_pct": str(mc_summary.probability_of_ruin_pct),
         }
 
+        equity_curve = [
+            {
+                "timestamp": pt.timestamp.isoformat(),
+                "equity": str(pt.total_equity.amount),
+                "drawdown_pct": str(pt.drawdown_pct),
+            }
+            for pt in result.equity_curve
+        ]
+
         return BacktestResponse(
             manifest_id=result.manifest.manifest_id,
             manifest_sha256=result.manifest.manifest_sha256,
@@ -553,6 +575,8 @@ class TradingLabState:
             trade_count=len(result.trades),
             conservation_residual=residual,
             feed_source=fetch_res.source,
+            strategy_name=request.strategy_name,
+            equity_curve=equity_curve,
         )
 
     def run_desk(self, request: DeskRunRequest) -> DeskRunResponse:
@@ -868,6 +892,180 @@ class TradingLabState:
                     )
                 )
             return items
+
+    def get_positions(
+        self,
+        currency: str | None = None,
+        currency_str: str | None = None,
+    ) -> PositionsListResponse:
+        effective_currency = currency or currency_str
+        with self._lock:
+            brokers = []
+            if effective_currency is None:
+                brokers = [self.inr_broker, self.usd_broker]
+            else:
+                brokers = [self.get_broker(effective_currency)]
+
+            items: list[PositionItem] = []
+            for b in brokers:
+                curr = b.portfolio.currency
+                for (ex, sym), pos in b.portfolio._positions.items():
+                    if pos.quantity != 0:
+                        mark_amount = self._mark_prices.get((ex, sym), pos.average_cost).amount
+                        mkt_val = mark_amount * Decimal(pos.quantity)
+                        unrealized = mkt_val - pos.cost_basis.amount
+                        pnl_pct = (
+                            (unrealized / pos.cost_basis.amount * Decimal("100"))
+                            if pos.cost_basis.amount > Decimal("0")
+                            else Decimal("0")
+                        )
+                        items.append(
+                            PositionItem(
+                                currency=curr.value,
+                                exchange=ex.value,
+                                symbol=sym,
+                                quantity=pos.quantity,
+                                average_cost=pos.average_cost.amount,
+                                mark_price=mark_amount,
+                                market_value=mkt_val,
+                                unrealized_pnl=unrealized,
+                                unrealized_pnl_pct=round(pnl_pct, 2),
+                            )
+                        )
+            return PositionsListResponse(positions=items)
+
+    def close_position(self, request: ClosePositionRequest) -> OrderResponse:
+        if self.kill_switch.is_active():
+            raise KillSwitchError(self.kill_switch.reason() or "Kill switch active")
+
+        exchange = Exchange(request.exchange)
+        symbol = request.symbol.strip().upper()
+        broker = self.get_broker(request.currency)
+
+        with self._lock:
+            pos = broker.portfolio._positions.get((exchange, symbol))
+            if pos is None or pos.quantity <= 0:
+                raise ValueError(f"No open position found for {exchange.value}:{symbol}")
+
+            qty_to_sell = pos.quantity
+            currency = broker.portfolio.currency
+            tick = Decimal("0.05") if currency == Currency.INR else Decimal("0.01")
+            instrument = Instrument(
+                exchange=exchange,
+                symbol=symbol,
+                currency=currency,
+                tick_size=tick,
+                lot_size=1,
+            )
+
+            feed_res = self.feed_bridge.fetch_candles(
+                exchange=exchange,
+                symbol=symbol,
+                interval=CandleInterval.D1,
+                bars_count=1,
+                mode="synthetic",
+            )
+            feed_price = feed_res.candles[-1].close
+            self._mark_prices[(exchange, symbol)] = Money(feed_price, currency)
+            now = datetime.now(timezone.utc)
+            if broker.portfolio.ledger.entries:
+                last_ts = broker.portfolio.ledger.entries[-1].timestamp
+                if now < last_ts:
+                    now = last_ts
+
+            candle = Candle(
+                symbol=symbol,
+                exchange=exchange,
+                interval=CandleInterval.M1,
+                open=feed_price,
+                high=feed_price,
+                low=feed_price,
+                close=feed_price,
+                volume=100000,
+                timestamp=now - timedelta(minutes=1),
+                source="api_close_position",
+                retrieval_timestamp=now,
+            )
+
+            proposal = TradeProposal(
+                proposal_id=f"close-{symbol}-{now.strftime('%H%M%S%f')}",
+                strategy_id="manual_close",
+                instrument=instrument,
+                timestamp=now,
+                side="SELL",
+                quantity=qty_to_sell,
+                order_type="MARKET",
+            )
+
+            order = broker.submit_order(
+                run_id=f"close-{now.strftime('%Y%m%d%H%M%S')}",
+                proposal=proposal,
+                current_candle=candle,
+                tick_size=instrument.tick_size,
+            )
+
+        return OrderResponse(
+            client_order_id=order.client_order_id,
+            run_id=order.run_id,
+            exchange=order.exchange.value,
+            symbol=order.symbol,
+            side=order.side,
+            quantity=order.quantity,
+            filled_quantity=order.filled_quantity,
+            status=order.status.value,
+            limit_price=order.limit_price.amount if order.limit_price else None,
+            stop_loss=order.stop_loss.amount if order.stop_loss else None,
+            take_profit=order.take_profit.amount if order.take_profit else None,
+            average_fill_price=order.average_fill_price.amount if order.average_fill_price else None,
+            fees=order.fees.amount,
+            slippage=order.slippage.amount,
+            reject_reason=order.reject_reason,
+            submitted_at=order.submitted_at,
+            filled_at=order.filled_at,
+        )
+
+    def get_lessons(self) -> list[str]:
+        return list(self.lessons_store.load_lessons())
+
+    def add_lesson(self, lesson: str) -> str:
+        return self.lessons_store.add_lesson(lesson)
+
+    def reset_sandbox(self) -> dict[str, Any]:
+        if self.kill_switch.is_active():
+            raise KillSwitchError(self.kill_switch.reason() or "Kill switch active")
+
+        with self._lock:
+            deposit_time = datetime(2025, 1, 1, 0, 0, tzinfo=timezone.utc)
+            self.inr_portfolio = PortfolioEngine(
+                Currency.INR,
+                fee_model=IndiaEquityFeeModel(),
+                slippage_model=BasisPointsSlippageModel(),
+            )
+            self.inr_portfolio.deposit(
+                Money(self.initial_inr_deposit, Currency.INR),
+                deposit_time,
+                "INITIAL_INR_DEPOSIT",
+            )
+            self.inr_broker = PaperBroker(self.inr_portfolio, kill_switch=self.kill_switch)
+
+            self.usd_portfolio = PortfolioEngine(
+                Currency.USD,
+                fee_model=USEquityFeeModel(),
+                slippage_model=BasisPointsSlippageModel(),
+            )
+            self.usd_portfolio.deposit(
+                Money(self.initial_usd_deposit, Currency.USD),
+                deposit_time,
+                "INITIAL_USD_DEPOSIT",
+            )
+            self.usd_broker = PaperBroker(self.usd_portfolio, kill_switch=self.kill_switch)
+            self._mark_prices.clear()
+
+            return {
+                "status": "ok",
+                "message": "Sandbox reset successfully",
+                "paper_only": True,
+            }
 
     def close(self) -> None:
         pass

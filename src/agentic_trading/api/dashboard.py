@@ -570,6 +570,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           <span id="killStatusText">Active</span>
         </span>
         <button id="toggleKillBtn" class="btn btn-danger-outline">Emergency Stop</button>
+        <button id="resetSandboxBtn" class="btn btn-ghost btn-sm" style="color:var(--text-dim);">Reset Sandbox</button>
       </div>
     </header>
 
@@ -631,6 +632,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           <span id="autoBuyLabel" class="switch-label">Auto-Buy ON</span>
         </label>
         <button id="runBacktestBtn" class="btn btn-secondary">Run Backtest</button>
+        <select id="backtestStrategySelect" style="background:#0f172a;color:var(--text);border:1px solid var(--border);padding:6px 10px;border-radius:6px;font-size:0.83rem;">
+          <option value="ema_pullback" selected>EMA Pullback (9/21)</option>
+          <option value="rsi_mean_reversion">RSI Mean Reversion (14)</option>
+          <option value="atr_breakout">ATR Breakout (20)</option>
+          <option value="sma_cross">SMA Cross (5/15)</option>
+        </select>
         <button id="toggleSettingsBtn" class="btn btn-ghost">Settings ▾</button>
       </div>
       <div id="settingsPanel" class="settings-panel" style="display: none;">
@@ -672,6 +679,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <div class="tabs-bar">
       <button id="tabOverviewBtn" class="tab-btn active">Overview</button>
       <button id="tabChatBtn" class="tab-btn">Agent Chat</button>
+      <button id="tabPositionsBtn" class="tab-btn">Positions</button>
+      <button id="tabBacktestBtn" class="tab-btn">Backtest</button>
+      <button id="tabLessonsBtn" class="tab-btn">Lessons</button>
     </div>
 
     <div id="tabOverviewPane" class="tab-pane active">
@@ -738,6 +748,75 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       </div>
       <div id="chatTraceContainer" class="chat-stream">
         <div class="empty-placeholder">No agent chat trace recorded for this cycle</div>
+      </div>
+    </div>
+
+    <div id="tabPositionsPane" class="tab-pane">
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-head">
+          <div class="section-title" style="margin-bottom:0;">Open Portfolio Positions</div>
+          <button id="refreshPositionsBtn" class="btn btn-ghost btn-sm">Refresh Positions</button>
+        </div>
+        <div id="positionsContainer" style="margin-top:10px;">
+          <div class="empty-placeholder">No open positions</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tabBacktestPane" class="tab-pane">
+      <div class="overview-grid" id="backtestMetricsGrid" style="margin-bottom:16px;">
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">Backtest Result</span>
+            <span id="backtestStrategyBadge" class="pill pill-blue">—</span>
+          </div>
+          <div class="equity-figure" id="backtestNetReturn">—</div>
+          <div class="metric-row"><span class="metric-name">Sharpe Ratio</span><span class="metric-num" id="backtestSharpe">—</span></div>
+          <div class="metric-row"><span class="metric-name">Max Drawdown</span><span class="metric-num" id="backtestDrawdown">—</span></div>
+          <div class="metric-row"><span class="metric-name">Win Rate</span><span class="metric-num" id="backtestWinRate">—</span></div>
+          <div class="metric-row"><span class="metric-name">Trades Count</span><span class="metric-num" id="backtestTradesCount">—</span></div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">Risk &amp; Verification</span>
+            <span id="backtestHmacBadge" class="pill pill-success">HMAC Verified</span>
+          </div>
+          <div class="metric-row"><span class="metric-name">Monte Carlo 95% VaR</span><span class="metric-num" id="backtestVar">—</span></div>
+          <div class="metric-row"><span class="metric-name">Profit Factor</span><span class="metric-num" id="backtestProfitFactor">—</span></div>
+          <div class="metric-row"><span class="metric-name">Expectancy</span><span class="metric-num" id="backtestExpectancy">—</span></div>
+          <div class="metric-row"><span class="metric-name">Bars Evaluated</span><span class="metric-num" id="backtestBars">—</span></div>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-head">
+          <div class="section-title" style="margin-bottom:0;">Equity Curve · Time Machine</div>
+          <span style="font-size:0.74rem;color:var(--text-dim);">Historical Portfolio Equity</span>
+        </div>
+        <div id="equityCurveReadoutBar" class="chart-readout">
+          <span>Hover over chart to inspect historical equity point</span>
+        </div>
+        <div style="position:relative; width:100%; height:280px; margin-top:8px;">
+          <canvas id="equityCurveCanvas" width="1080" height="280" style="width:100%; height:280px; display:block; border-radius:6px; background:#0b1120;"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div id="tabLessonsPane" class="tab-pane">
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-head">
+          <div class="section-title" style="margin-bottom:0;">Active Trading Lessons &amp; Risk Rules</div>
+          <span class="pill pill-purple">SQLite Backed</span>
+        </div>
+        <div style="font-size:0.8rem;color:var(--text-muted);margin:8px 0 14px 0;">
+          These lessons are injected directly into the Strategist and Risk Guardian agent reasoning prompts on every cycle.
+        </div>
+        <div style="display:flex;gap:10px;margin-bottom:16px;">
+          <input type="text" id="lessonInput" placeholder="Enter custom trading rule or lesson (e.g. 'Never trade counter-trend on Friday afternoons')" style="flex:1;background:#0f172a;color:var(--text);border:1px solid var(--border);padding:8px 12px;border-radius:6px;font-size:0.83rem;">
+          <button id="addLessonBtn" class="btn btn-primary">Add Rule</button>
+        </div>
+        <div id="lessonsContainer">
+          <div class="empty-placeholder">No active trading lessons stored</div>
+        </div>
       </div>
     </div>
   </div>
@@ -858,21 +937,25 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     }
 
     function switchTab(tabName) {
-      const overviewBtn = document.getElementById("tabOverviewBtn");
-      const chatBtn = document.getElementById("tabChatBtn");
-      const overviewPane = document.getElementById("tabOverviewPane");
-      const chatPane = document.getElementById("tabChatPane");
-
-      if (tabName === "overview") {
-        overviewBtn.className = "tab-btn active";
-        chatBtn.className = "tab-btn";
-        overviewPane.className = "tab-pane active";
-        chatPane.className = "tab-pane";
-      } else {
-        overviewBtn.className = "tab-btn";
-        chatBtn.className = "tab-btn active";
-        overviewPane.className = "tab-pane";
-        chatPane.className = "tab-pane active";
+      const tabs = ["overview", "chat", "positions", "backtest", "lessons"];
+      tabs.forEach(t => {
+        const cap = t.charAt(0).toUpperCase() + t.slice(1);
+        const btn = document.getElementById("tab" + cap + "Btn");
+        const pane = document.getElementById("tab" + cap + "Pane");
+        if (btn && pane) {
+          if (t === tabName) {
+            btn.className = "tab-btn active";
+            pane.className = "tab-pane active";
+          } else {
+            btn.className = "tab-btn";
+            pane.className = "tab-pane";
+          }
+        }
+      });
+      if (tabName === "positions") {
+        loadPositions();
+      } else if (tabName === "lessons") {
+        loadLessons();
       }
     }
 
@@ -1613,6 +1696,350 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       }
     }
 
+    async function loadPositions() {
+      const container = document.getElementById("positionsContainer");
+      try {
+        const res = await fetch("/api/positions");
+        if (!res.ok) {
+          showStatus("Failed to load positions: " + res.statusText, true);
+          return;
+        }
+        const data = await res.json();
+        const positions = data.positions || [];
+        while (container.firstChild) container.removeChild(container.firstChild);
+
+        if (positions.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "empty-placeholder";
+          empty.textContent = "No open positions currently in INR or USD paper portfolios";
+          container.appendChild(empty);
+          return;
+        }
+
+        const table = document.createElement("table");
+        table.className = "plans-table";
+        const thead = document.createElement("thead");
+        const trHead = document.createElement("tr");
+        ["Symbol", "Exchange", "Currency", "Quantity", "Avg Cost", "Mark Price", "Market Value", "Unrealized P&L", "Action"].forEach(h => {
+          const th = document.createElement("th");
+          th.textContent = h;
+          trHead.appendChild(th);
+        });
+        thead.appendChild(trHead);
+        table.appendChild(thead);
+
+        const tbody = document.createElement("tbody");
+        positions.forEach(pos => {
+          const tr = document.createElement("tr");
+
+          const tdSym = document.createElement("td");
+          tdSym.style.fontWeight = "600";
+          tdSym.textContent = pos.symbol;
+          tr.appendChild(tdSym);
+
+          const tdEx = document.createElement("td");
+          tdEx.textContent = pos.exchange;
+          tr.appendChild(tdEx);
+
+          const tdCurr = document.createElement("td");
+          tdCurr.textContent = pos.currency;
+          tr.appendChild(tdCurr);
+
+          const tdQty = document.createElement("td");
+          tdQty.textContent = pos.quantity;
+          tr.appendChild(tdQty);
+
+          const tdAvg = document.createElement("td");
+          tdAvg.textContent = Number(pos.average_cost).toFixed(2);
+          tr.appendChild(tdAvg);
+
+          const tdMark = document.createElement("td");
+          tdMark.textContent = Number(pos.mark_price).toFixed(2);
+          tr.appendChild(tdMark);
+
+          const tdVal = document.createElement("td");
+          tdVal.textContent = Number(pos.market_value).toFixed(2);
+          tr.appendChild(tdVal);
+
+          const tdPnl = document.createElement("td");
+          const pnlNum = Number(pos.unrealized_pnl);
+          tdPnl.textContent = (pnlNum >= 0 ? "+" : "") + pnlNum.toFixed(2);
+          tdPnl.style.fontWeight = "600";
+          tdPnl.style.color = pnlNum >= 0 ? "var(--success)" : "var(--danger)";
+          tr.appendChild(tdPnl);
+
+          const tdAct = document.createElement("td");
+          const sellBtn = document.createElement("button");
+          sellBtn.className = "btn btn-danger-outline btn-sm";
+          sellBtn.textContent = "Sell / Close";
+          sellBtn.onclick = () => closePosition(pos);
+          tdAct.appendChild(sellBtn);
+          tr.appendChild(tdAct);
+
+          tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        container.appendChild(table);
+      } catch (err) {
+        showStatus("Error loading positions: " + err, true);
+      }
+    }
+
+    async function closePosition(pos) {
+      if (!confirm("Are you sure you want to close position in " + pos.symbol + " (" + pos.quantity + " units)?")) {
+        return;
+      }
+      showStatus("Submitting close order for " + pos.symbol + "...", false);
+      try {
+        const res = await fetch("/api/positions/close", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            exchange: pos.exchange,
+            symbol: pos.symbol,
+            currency: pos.currency
+          })
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          showStatus("Close position failed: " + (err.detail || res.statusText), true);
+          return;
+        }
+        showStatus("Position closed for " + pos.symbol, false);
+        await refreshAll();
+        await loadPositions();
+      } catch (err) {
+        showStatus("Close position error: " + err, true);
+      }
+    }
+
+    async function loadLessons() {
+      const container = document.getElementById("lessonsContainer");
+      try {
+        const res = await fetch("/api/lessons");
+        if (!res.ok) return;
+        const data = await res.json();
+        const lessons = data.lessons || [];
+        while (container.firstChild) container.removeChild(container.firstChild);
+
+        if (lessons.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "empty-placeholder";
+          empty.textContent = "No active trading lessons stored in database";
+          container.appendChild(empty);
+          return;
+        }
+
+        const list = document.createElement("div");
+        list.style.display = "flex";
+        list.style.flexDirection = "column";
+        list.style.gap = "8px";
+
+        lessons.forEach((l, idx) => {
+          const item = document.createElement("div");
+          item.style.padding = "10px 14px";
+          item.style.background = "#0b1120";
+          item.style.border = "1px solid #1e293b";
+          item.style.borderRadius = "6px";
+          item.style.fontSize = "0.82rem";
+          item.style.display = "flex";
+          item.style.alignItems = "center";
+          item.style.gap = "10px";
+
+          const badge = document.createElement("span");
+          badge.className = "pill pill-purple";
+          badge.textContent = "#" + (idx + 1);
+          item.appendChild(badge);
+
+          const txt = document.createElement("span");
+          txt.style.color = "var(--text)";
+          txt.textContent = l;
+          item.appendChild(txt);
+
+          list.appendChild(item);
+        });
+
+        container.appendChild(list);
+      } catch (err) {
+        showStatus("Error loading lessons: " + err, true);
+      }
+    }
+
+    async function addLesson() {
+      const input = document.getElementById("lessonInput");
+      const text = input.value.trim();
+      if (!text) return;
+      try {
+        const res = await fetch("/api/lessons", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lesson: text })
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          showStatus("Failed to add rule: " + (err.detail || res.statusText), true);
+          return;
+        }
+        input.value = "";
+        showStatus("Trading rule added to persistent knowledge base", false);
+        await loadLessons();
+      } catch (err) {
+        showStatus("Error adding lesson: " + err, true);
+      }
+    }
+
+    async function resetSandbox() {
+      if (!confirm("Reset Paper Trading Sandbox? This will restore INR to 1,000,000, USD to 25,000, and clear all positions.")) {
+        return;
+      }
+      try {
+        const res = await fetch("/api/sandbox/reset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ confirm: true })
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          showStatus("Reset failed: " + (err.detail || res.statusText), true);
+          return;
+        }
+        showStatus("Sandbox reset successfully to initial capital", false);
+        await refreshAll();
+        await loadPositions();
+      } catch (err) {
+        showStatus("Reset error: " + err, true);
+      }
+    }
+
+    let currentEquityCurve = [];
+    function renderEquityCurve(equityCurve, metrics) {
+      currentEquityCurve = equityCurve || [];
+      const canvas = document.getElementById("equityCurveCanvas");
+      const ctx = canvas.getContext("2d");
+      const width = canvas.width;
+      const height = canvas.height;
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#0b1120";
+      ctx.fillRect(0, 0, width, height);
+
+      const readout = document.getElementById("equityCurveReadoutBar");
+
+      if (currentEquityCurve.length === 0) {
+        ctx.fillStyle = "#64748b";
+        ctx.font = "14px -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("No equity curve data available for this backtest", width / 2, height / 2);
+        readout.textContent = "No equity curve data available";
+        return;
+      }
+
+      const padTop = 20;
+      const padBottom = 28;
+      const padLeft = 70;
+      const padRight = 30;
+      const plotWidth = width - padLeft - padRight;
+      const plotHeight = height - padTop - padBottom;
+
+      let minEq = Infinity;
+      let maxEq = -Infinity;
+      currentEquityCurve.forEach(pt => {
+        const eq = Number(pt.equity !== undefined ? pt.equity : pt.total_equity);
+        if (eq < minEq) minEq = eq;
+        if (eq > maxEq) maxEq = eq;
+      });
+
+      const range = (maxEq - minEq) || 1.0;
+      minEq -= range * 0.05;
+      maxEq += range * 0.05;
+      const fullRange = maxEq - minEq;
+
+      function scaleX(idx) {
+        return padLeft + (idx / Math.max(1, currentEquityCurve.length - 1)) * plotWidth;
+      }
+      function scaleY(val) {
+        return padTop + (1.0 - (val - minEq) / fullRange) * plotHeight;
+      }
+
+      ctx.fillStyle = "rgba(255, 255, 255, 0.02)";
+      ctx.fillRect(padLeft, padTop, plotWidth, plotHeight);
+
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
+      ctx.lineWidth = 1;
+      const gridSteps = 4;
+      ctx.fillStyle = "#64748b";
+      ctx.font = "10px monospace";
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      for (let i = 0; i <= gridSteps; i++) {
+        const val = minEq + (i / gridSteps) * fullRange;
+        const y = scaleY(val);
+        ctx.beginPath();
+        ctx.moveTo(padLeft, y);
+        ctx.lineTo(padLeft + plotWidth, y);
+        ctx.stroke();
+        ctx.fillText(Number(val).toFixed(0), padLeft - 8, y);
+      }
+
+      const grad = ctx.createLinearGradient(0, padTop, 0, padTop + plotHeight);
+      grad.addColorStop(0, "rgba(34, 197, 94, 0.25)");
+      grad.addColorStop(1, "rgba(34, 197, 94, 0.0)");
+
+      ctx.beginPath();
+      currentEquityCurve.forEach((pt, idx) => {
+        const eq = Number(pt.equity !== undefined ? pt.equity : pt.total_equity);
+        const x = scaleX(idx);
+        const y = scaleY(eq);
+        if (idx === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+      ctx.lineTo(scaleX(currentEquityCurve.length - 1), padTop + plotHeight);
+      ctx.lineTo(scaleX(0), padTop + plotHeight);
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      ctx.beginPath();
+      currentEquityCurve.forEach((pt, idx) => {
+        const eq = Number(pt.equity !== undefined ? pt.equity : pt.total_equity);
+        const x = scaleX(idx);
+        const y = scaleY(eq);
+        if (idx === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+      ctx.strokeStyle = "#22c55e";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      const lastPt = currentEquityCurve[currentEquityCurve.length - 1];
+      const lastEq = Number(lastPt.equity !== undefined ? lastPt.equity : lastPt.total_equity);
+      readout.textContent = "Final Equity: " + lastEq.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " · Points: " + currentEquityCurve.length + " · Return: " + (metrics ? metrics.total_return_pct + "%" : "—");
+
+      canvas.onmousemove = function(ev) {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = (ev.clientX - rect.left) * (canvas.width / rect.width);
+        if (mouseX >= padLeft && mouseX <= padLeft + plotWidth) {
+          const ratio = (mouseX - padLeft) / plotWidth;
+          const idx = Math.min(currentEquityCurve.length - 1, Math.max(0, Math.round(ratio * (currentEquityCurve.length - 1))));
+          const pt = currentEquityCurve[idx];
+          const eqVal = Number(pt.equity !== undefined ? pt.equity : pt.total_equity);
+          const tsStr = (pt.timestamp || "").slice(0, 19).replace("T", " ");
+          readout.textContent = "Point #" + (idx + 1) + " · " + tsStr + " · Equity: " + eqVal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + (pt.drawdown_pct ? " · DD: " + pt.drawdown_pct + "%" : "");
+        }
+      };
+
+      canvas.onmouseleave = function() {
+        readout.textContent = "Final Equity: " + lastEq.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " · Points: " + currentEquityCurve.length + " · Return: " + (metrics ? metrics.total_return_pct + "%" : "—");
+      };
+    }
+
     async function runBacktest() {
       const market = document.getElementById("marketSelect").value;
       const currency = (market === "NSE") ? "INR" : "USD";
@@ -1621,9 +2048,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       const symbols = rawWl.split(",").map(s => s.trim().toUpperCase()).filter(Boolean);
       const symbol = symbols.length > 0 ? symbols[0] : (market === "NSE" ? "RELIANCE" : "AAPL");
       const feedSource = document.getElementById("feedSourceSelect").value;
+      const strategyName = document.getElementById("backtestStrategySelect").value;
       const initialCapital = (currency === "INR") ? "1000000" : "25000";
 
-      showStatus("Executing Time Machine backtest (" + symbol + ", " + exchange + ", " + feedSource + ")...", false);
+      showStatus("Executing Time Machine backtest (" + symbol + ", " + strategyName + ", " + feedSource + ")...", false);
       try {
         const res = await fetch("/api/backtest", {
           method: "POST",
@@ -1636,7 +2064,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             bars_count: 100,
             random_seed: 42,
             monte_carlo_runs: 500,
-            feed_source: feedSource
+            feed_source: feedSource,
+            strategy_name: strategyName
           })
         });
         if (!res.ok) {
@@ -1645,8 +2074,25 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           return;
         }
         const data = await res.json();
+
+        document.getElementById("backtestStrategyBadge").textContent = data.strategy_name || strategyName;
+        document.getElementById("backtestNetReturn").textContent = data.metrics.total_return_pct + "%";
+        document.getElementById("backtestNetReturn").style.color = Number(data.metrics.total_return_pct) >= 0 ? "var(--success)" : "var(--danger)";
+        document.getElementById("backtestSharpe").textContent = String(data.metrics.sharpe_ratio);
+        document.getElementById("backtestDrawdown").textContent = data.metrics.max_drawdown_pct + "%";
+        document.getElementById("backtestWinRate").textContent = data.metrics.win_rate_pct + "%";
+        document.getElementById("backtestTradesCount").textContent = String(data.metrics.total_trades);
+        document.getElementById("backtestVar").textContent = data.monte_carlo.max_drawdown_pct_p95 + "%";
+        document.getElementById("backtestProfitFactor").textContent = String(data.metrics.profit_factor);
+        document.getElementById("backtestExpectancy").textContent = formatMoney(data.metrics.expectancy, currency);
+        document.getElementById("backtestBars").textContent = String(data.bars_evaluated);
+
+        renderEquityCurve(data.equity_curve, data.metrics);
+        switchTab("backtest");
+
         const lines = [
           "TIME MACHINE BACKTEST COMPLETED",
+          "Strategy:             " + (data.strategy_name || strategyName),
           "Manifest ID:          " + data.manifest_id,
           "Manifest SHA-256:     " + data.manifest_sha256,
           "Manifest Verified:    " + data.manifest_verified,
@@ -1669,7 +2115,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           "  Probability of Loss:" + data.monte_carlo.probability_of_loss_pct + "%"
         ];
         document.getElementById("overviewRawReport").textContent = lines.join("\\n");
-        showStatus("Backtest completed (" + data.trade_count + " trades, manifest: " + data.manifest_id + ")", false);
+        showStatus("Backtest completed (" + data.trade_count + " trades, strategy: " + (data.strategy_name || strategyName) + ")", false);
         await refreshAll();
       } catch (err) {
         showStatus("Backtest error: " + err, true);
@@ -1683,6 +2129,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     }
 
     document.getElementById("toggleKillBtn").addEventListener("click", toggleKillSwitch);
+    document.getElementById("resetSandboxBtn").addEventListener("click", resetSandbox);
+    document.getElementById("refreshPositionsBtn").addEventListener("click", loadPositions);
+    document.getElementById("addLessonBtn").addEventListener("click", addLesson);
+    document.getElementById("lessonInput").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") addLesson();
+    });
     document.getElementById("autoBuyToggle").addEventListener("change", (e) => {
       const label = document.getElementById("autoBuyLabel");
       if (e.target.checked) {
@@ -1698,6 +2150,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     document.getElementById("toggleSettingsBtn").addEventListener("click", toggleSettings);
     document.getElementById("tabOverviewBtn").addEventListener("click", () => switchTab("overview"));
     document.getElementById("tabChatBtn").addEventListener("click", () => switchTab("chat"));
+    document.getElementById("tabPositionsBtn").addEventListener("click", () => switchTab("positions"));
+    document.getElementById("tabBacktestBtn").addEventListener("click", () => switchTab("backtest"));
+    document.getElementById("tabLessonsBtn").addEventListener("click", () => switchTab("lessons"));
     document.getElementById("cycleSelect").addEventListener("change", (e) => {
       if (e.target.value) loadCycleDetail(e.target.value);
     });

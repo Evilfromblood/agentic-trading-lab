@@ -5,7 +5,7 @@ import json
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -350,28 +350,83 @@ class DecisionLog:
 
 
 class HumanLessonsStore:
-    """Read-only store for human-curated trading heuristics and lessons."""
+    """Store for human-curated trading heuristics and lessons with SQLite persistence."""
 
-    def __init__(self, lessons: tuple[str, ...] = ()) -> None:
-        self._lessons = tuple(str(x).strip() for x in lessons if str(x).strip())
+    def __init__(
+        self,
+        lessons: tuple[str, ...] = (),
+        db_path: Path | str | None = None,
+    ) -> None:
+        self._memory_lessons: list[str] = [str(x).strip() for x in lessons if str(x).strip()]
+        self._db_path = Path(db_path) if db_path else None
+        if self._db_path:
+            self._init_sqlite()
+
+    def _init_sqlite(self) -> None:
+        assert self._db_path is not None
+        conn = sqlite3.connect(self._db_path)
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS lessons (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        lesson TEXT NOT NULL,
+                        created_at TEXT NOT NULL
+                    )
+                    """
+                )
+        finally:
+            conn.close()
 
     @classmethod
-    def from_file(cls, path: Path | str) -> HumanLessonsStore:
+    def from_file(cls, path: Path | str, db_path: Path | str | None = None) -> HumanLessonsStore:
         p = Path(path)
         if not p.exists():
-            return cls(())
+            return cls((), db_path=db_path)
         content = p.read_text(encoding="utf-8").strip()
         if not content:
-            return cls(())
+            return cls((), db_path=db_path)
         if content.startswith("["):
             try:
                 items = json.loads(content)
                 if isinstance(items, list):
-                    return cls(tuple(str(x) for x in items))
+                    return cls(tuple(str(x) for x in items), db_path=db_path)
             except (json.JSONDecodeError, ValueError, TypeError):
                 pass
         lines = [line.strip() for line in content.splitlines() if line.strip()]
-        return cls(tuple(lines))
+        return cls(tuple(lines), db_path=db_path)
+
+    def add_lesson(self, lesson: str) -> str:
+        clean = " ".join(lesson.strip().split())
+        clean = "".join(ch for ch in clean if ord(ch) >= 32 or ch in "\n\t")
+        if not clean:
+            raise ValueError("lesson cannot be empty")
+        if len(clean) > 240:
+            raise ValueError("lesson exceeds 240 characters")
+        if self._db_path:
+            conn = sqlite3.connect(self._db_path)
+            try:
+                with conn:
+                    conn.execute(
+                        "INSERT INTO lessons (lesson, created_at) VALUES (?, ?)",
+                        (clean, datetime.now(timezone.utc).isoformat()),
+                    )
+            finally:
+                conn.close()
+        else:
+            self._memory_lessons.append(clean)
+        return clean
 
     def load_lessons(self) -> tuple[str, ...]:
-        return self._lessons
+        if self._db_path:
+            conn = sqlite3.connect(self._db_path)
+            try:
+                with conn:
+                    cursor = conn.execute("SELECT lesson FROM lessons ORDER BY id ASC")
+                    db_items = [row[0] for row in cursor.fetchall()]
+                    combined = list(self._memory_lessons) + db_items
+                    return tuple(dict.fromkeys(combined))
+            finally:
+                conn.close()
+        return tuple(self._memory_lessons)
