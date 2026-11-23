@@ -151,9 +151,19 @@ class MarketAnalyst:
             inv = support if view == "bullish" else resistance
 
         if view == "bullish" and inv >= close:
+            view = "neutral"
+            out["view"] = "neutral"
             inv = support
+            out["data_quality"] = "missing"
+            confidence = min(confidence, Decimal("0.2"))
+            out["confidence"] = float(confidence)
         elif view == "bearish" and inv <= close:
+            view = "neutral"
+            out["view"] = "neutral"
             inv = resistance
+            out["data_quality"] = "missing"
+            confidence = min(confidence, Decimal("0.2"))
+            out["confidence"] = float(confidence)
         out["invalidation"] = float(inv)
 
         evidence_list = out.get("evidence", [])
@@ -164,16 +174,26 @@ class MarketAnalyst:
         for v in user_payload.values():
             payload_numbers.update(_extract_numbers(str(v)))
 
+        has_hallucinated_number = False
         validated_evidence: list[str] = []
         for ev in evidence_list:
             ev_str = str(ev)
             ev_nums = _extract_numbers(ev_str)
-            if ev_nums and any(n in payload_numbers for n in ev_nums):
+            if ev_nums and any(n not in payload_numbers for n in ev_nums):
+                has_hallucinated_number = True
+                validated_evidence.append(
+                    f"{ev_str} [UNVERIFIED NUMERIC EVIDENCE]"
+                )
+            elif ev_nums and all(n in payload_numbers for n in ev_nums):
                 validated_evidence.append(ev_str)
             else:
                 validated_evidence.append(
                     f"{ev_str} [Verified metrics: close={close}, support={support}, rsi={r14}]"
                 )
+        if has_hallucinated_number:
+            out["data_quality"] = "missing"
+            confidence = min(confidence, Decimal("0.3"))
+            out["confidence"] = float(confidence)
         out["evidence"] = validated_evidence
 
         return AgentEnvelope(

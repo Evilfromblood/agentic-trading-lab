@@ -93,7 +93,23 @@ def invoke_with_schema_guard(
     required_keys: Sequence[str],
     cost_usd: Decimal = Decimal("0"),
 ) -> AgentEnvelope:
-    inputs_hash = compute_inputs_hash(user_payload)
+    try:
+        inputs_hash = compute_inputs_hash(user_payload)
+    except (ValueError, TypeError):
+        return AgentEnvelope(
+            run_id=run_id,
+            agent=agent,
+            agent_version=agent_version,
+            prompt_version=prompt_version,
+            model=model,
+            ticker=ticker,
+            as_of=as_of,
+            inputs_hash=f"sha256:invalid_inputs_{ticker}",
+            output={"data_quality": "missing"},
+            errors=("Invalid non-finite input payload",),
+            latency_ms=0,
+            cost_usd=cost_usd,
+        )
     start_time = time.perf_counter()
 
     for attempt in range(2):

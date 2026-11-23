@@ -23,19 +23,31 @@ class KillSwitch:
         self.stop_file = Path(stop_file)
 
     def is_active(self) -> bool:
-        env_val = os.environ.get(self.env_var, "").strip().upper()
-        if env_val in {"1", "TRUE", "YES", "ON"}:
+        try:
+            env_val = os.environ.get(self.env_var, "").strip().upper()
+            if env_val in {"1", "TRUE", "YES", "ON"}:
+                return True
+        except (KeyError, TypeError):
             return True
-        if self.stop_file.exists():
+        try:
+            if self.stop_file.exists():
+                return True
+        except OSError:
             return True
         return False
 
     def reason(self) -> str | None:
-        env_val = os.environ.get(self.env_var, "").strip().upper()
-        if env_val in {"1", "TRUE", "YES", "ON"}:
-            return f"Environment variable {self.env_var}={env_val} is active"
-        if self.stop_file.exists():
-            return f"Stop file {self.stop_file} exists"
+        try:
+            env_val = os.environ.get(self.env_var, "").strip().upper()
+            if env_val in {"1", "TRUE", "YES", "ON"}:
+                return f"Environment variable {self.env_var}={env_val} is active"
+        except (KeyError, TypeError):
+            return f"Environment variable {self.env_var} check failed (failing closed)"
+        try:
+            if self.stop_file.exists():
+                return f"Stop file {self.stop_file} exists"
+        except OSError:
+            return f"Stop file {self.stop_file} inaccessible (failing closed)"
         return None
 
     def assert_clear(self) -> None:

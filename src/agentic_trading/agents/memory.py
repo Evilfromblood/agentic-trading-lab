@@ -117,6 +117,36 @@ class DecisionLog:
                 conn.close()
 
     def get_records(self, run_id: str | None = None) -> tuple[DecisionRecord, ...]:
+        if self._db_path and self._db_path.exists():
+            conn = sqlite3.connect(self._db_path)
+            try:
+                with conn:
+                    if run_id is None:
+                        cursor = conn.execute("SELECT record_json FROM decision_records ORDER BY id ASC")
+                    else:
+                        cursor = conn.execute(
+                            "SELECT record_json FROM decision_records WHERE run_id = ? ORDER BY id ASC",
+                            (run_id,),
+                        )
+                    results: list[DecisionRecord] = []
+                    for (raw_json,) in cursor.fetchall():
+                        data = json.loads(raw_json)
+                        results.append(
+                            DecisionRecord(
+                                run_id=data["run_id"],
+                                timestamp=datetime.fromisoformat(data["timestamp"]),
+                                ticker=data["ticker"],
+                                inputs_hash=data["inputs_hash"],
+                                analyst_envelopes=data["analyst_envelopes"],
+                                shortlist_rank=data["shortlist_rank"],
+                                strategist_proposal=data["strategist_proposal"],
+                                risk_decision=data["risk_decision"],
+                                paper_order=data["paper_order"],
+                            )
+                        )
+                    return tuple(results)
+            finally:
+                conn.close()
         if run_id is None:
             return tuple(self._records)
         return tuple(r for r in self._records if r.run_id == run_id)

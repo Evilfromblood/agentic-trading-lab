@@ -108,37 +108,53 @@ class TradingDeskOrchestrator:
         envelopes: dict[tuple[str, str], AgentEnvelope] = {}
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            future_to_task: dict[concurrent.futures.Future[AgentEnvelope], tuple[str, str]] = {}
+            task_futures: list[tuple[str, str, concurrent.futures.Future[AgentEnvelope]]] = []
             for t in watchlist:
                 sym = t.instrument.symbol
-                future_to_task[
-                    executor.submit(self.market_analyst.analyze, t.context, run_id)
-                ] = ("market", sym)
-                future_to_task[
-                    executor.submit(
-                        self.data_analyst.analyze,
-                        t.fundamental_snapshot,
+                task_futures.append(
+                    ("market", sym, executor.submit(self.market_analyst.analyze, t.context, run_id))
+                )
+                task_futures.append(
+                    (
+                        "data",
                         sym,
-                        as_of,
-                        run_id,
+                        executor.submit(
+                            self.data_analyst.analyze,
+                            t.fundamental_snapshot,
+                            sym,
+                            as_of,
+                            run_id,
+                        ),
                     )
-                ] = ("data", sym)
-                future_to_task[
-                    executor.submit(
-                        self.news_analyst.analyze,
-                        t.news_articles,
-                        t.scheduled_events,
+                )
+                task_futures.append(
+                    (
+                        "news",
                         sym,
-                        as_of,
-                        run_id,
+                        executor.submit(
+                            self.news_analyst.analyze,
+                            t.news_articles,
+                            t.scheduled_events,
+                            sym,
+                            as_of,
+                            run_id,
+                        ),
                     )
-                ] = ("news", sym)
+                )
 
-            for future in concurrent.futures.as_completed(future_to_task):
-                agent_type, sym = future_to_task[future]
+            for agent_type, sym, future in task_futures:
                 try:
                     envelope = future.result()
-                except (RuntimeError, ValueError, TypeError, TimeoutError) as exc:
+                except (
+                    RuntimeError,
+                    ValueError,
+                    TypeError,
+                    TimeoutError,
+                    OSError,
+                    ArithmeticError,
+                    KeyError,
+                    AttributeError,
+                ) as exc:
                     envelope = AgentEnvelope(
                         run_id=run_id,
                         agent=agent_type,
@@ -213,6 +229,9 @@ class TradingDeskOrchestrator:
 
         daily_pnl = Money(snapshot.realized_pnl.amount + snapshot.unrealized_pnl.amount, currency)
         peak_equity = snapshot.total_equity
+
+        if proposals:
+            self.paper_broker.kill_switch.assert_clear()
 
         for proposal in proposals:
             sym = proposal.instrument.symbol

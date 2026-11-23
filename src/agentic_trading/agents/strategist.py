@@ -156,9 +156,16 @@ class Strategist:
             entry = Decimal(str(out.get("entry", current_candle.close)))
             stop = Decimal(str(out.get("stop", "0")))
             target = Decimal(str(out.get("target", "0")))
-        except (ValueError, TypeError, ArithmeticError):
+            confidence_val = float(out.get("confidence", 0.0))
+            if not (entry.is_finite() and stop.is_finite() and target.is_finite()):
+                raise ValueError("non-finite pricing levels")
+            if entry <= Decimal("0") or stop <= Decimal("0") or target <= Decimal("0"):
+                raise ValueError("non-positive pricing levels")
+            if confidence_val != confidence_val or confidence_val < 0.0 or confidence_val > 1.0:
+                raise ValueError("confidence outside [0.0, 1.0]")
+        except (ValueError, TypeError, ArithmeticError) as exc:
             out["action"] = "no_trade"
-            out["disagreement"] = "Malformed numeric pricing levels in proposal"
+            out["disagreement"] = f"Malformed pricing or confidence: {exc}"
             return make_result_env(), None
 
         if not (stop < entry < target):

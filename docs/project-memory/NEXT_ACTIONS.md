@@ -30,12 +30,12 @@ Current priority: Milestone 5 (Paper Trading Engine & 7-Agent AI Research Desk) 
    - Walk-forward validation with isolated train/test splits and non-overlapping OOS windows.
    - Seeded Monte Carlo bootstrap with graceful zero-trade handling and deterministic ruin/drawdown quantiles.
    - 441 tests passing across the full suite on Python 3.11 and Python 3.14 with 88.54% coverage. Zero inline `#` comments.
-6. M5 Paper Trading Engine & 7-Agent AI Research Desk implemented and verified (ADR-028):
-   - Independent hardware-like `KillSwitch` checking env var and filesystem sentinel file in O(1).
-   - `PaperBroker` with idempotent deterministic order IDs, kill switch checks, market hours checks, adverse slippage and statutory fee execution, and daily reconciliation asserting exact zero conservation residual.
+6. M5 Paper Trading Engine & 7-Agent AI Research Desk implemented, hardened, and verified (ADR-028, ADR-029):
+   - Independent hardware-like `KillSwitch` with fail-closed OSError handling checking env var and filesystem sentinel file in O(1).
+   - `PaperBroker` with idempotent deterministic order IDs, limit price bounds, explicit cancellation state machine (`cancel_order`), thread-safe concurrency (`threading.RLock`), market hours checks, adverse slippage and statutory fee execution, and daily reconciliation asserting exact zero conservation residual.
    - Authoritative risk gate extended with sector concentration limits (`SECTOR_LIMIT_EXCEEDED`) and corporate event blackout (`EVENT_BLACKOUT`).
-   - 7-Agent AI Research Desk: strict JSON schema `AgentEnvelope` with input hashing and retries, framework-agnostic `LLMClient` with deterministic stubs, 3-tier memory (`WorkingState`, append-only SQLite `DecisionLog`, read-only `HumanLessonsStore`), Market Analyst, Data Analyst with filing staleness checks, News Analyst with prompt injection containment and blackout enforcement, Opportunity Scout with shortlist capping, Strategist with deterministic math verification of trade proposals, Daily Reporter EOD executive summary, and 4-stage pipeline `TradingDeskOrchestrator`.
-   - 453 tests passing across the full suite on Python 3.11 and Python 3.14 with 88.04% coverage. Zero inline `#` comments.
+   - 7-Agent AI Research Desk: strict JSON schema `AgentEnvelope` with input hashing and non-finite input guards, framework-agnostic `LLMClient` with deterministic stubs, 3-tier memory (`WorkingState`, append-only SQLite `DecisionLog` with deterministic retrieval, read-only `HumanLessonsStore`), Market Analyst with evidence number verification and invalidation guards, Data Analyst with filing staleness checks, News Analyst with control character stripping, sentiment clamping, and blackout enforcement, Opportunity Scout with shortlist capping, Strategist with deterministic math verification of pricing and reward-to-risk, Daily Reporter EOD executive summary, and 4-stage pipeline `TradingDeskOrchestrator` with deterministic fan-out ordering and pre-Stage 4 kill switch checks.
+   - 457 tests passing across the full suite on Python 3.11 and Python 3.14 with 87.91% coverage. Zero inline `#` comments.
 7. Next: Milestone 6 (Live Web Dashboard & Visual Monitoring), strategy optimization, and live feed paper testing.
 
 ## Review/remediation loop

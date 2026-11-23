@@ -2,6 +2,34 @@
 
 Append concise entries in reverse chronological order. Record verified outcomes, not intentions.
 
+## 2026-11-23 — Milestone 5 Adversarial Audit & Hardening (ADR-029)
+- Hardened all Milestone 5 components against adversarial failure modes, concurrency races, and prompt injections:
+  - **PaperBroker Limit Price Bounds, State Machine & Concurrency (`broker.py`)**:
+    - Enforced immediate validation of `limit_price` (rejecting non-positive prices with `ValueError` and currency mismatches with `CurrencyMismatchError`).
+    - Evaluated slipped execution price against limit order bounds prior to execution: unmarketable BUYs (`slipped > limit`) and SELLs (`slipped < limit`) are kept in `OrderStatus.PENDING` without calling `apply_fill`, eliminating unwanted fills, ledger records, or cash mutations.
+    - Added deterministic `cancel_order(client_order_id)` allowing cancellation of `PENDING` and `SUBMITTED` orders, partially cancelling unfilled balances, and rejecting cancellations on terminal statuses (`FILLED`, `REJECTED`, `CANCELLED`) with `ValueError`.
+    - Guarded broker order lookups, submissions, cancellations, and reconciliations with `threading.RLock()`, guaranteeing that concurrent duplicate submissions produce exactly 1 fill and 0 residual drift.
+  - **KillSwitch & Memory Hardening (`kill_switch.py`, `memory.py`)**:
+    - Handled `OSError` / filesystem permission errors on sentinel path checks by failing closed (`is_active() == True`).
+    - Upgraded `DecisionLog` SQLite retrieval to use parameterized queries (`?`), explicit transactional context managers, and deterministic `ORDER BY id ASC` ordering.
+  - **Agent Security & Math Guards (`envelope.py`, `news_analyst.py`, `market_analyst.py`, `strategist.py`)**:
+    - `invoke_with_schema_guard`: Catches non-finite `NaN`/`Infinity` floats or Decimals in input payloads and fails closed with `data_quality="missing"`.
+    - `NewsAnalyst`: Strips ASCII control characters from untrusted article text, clamps `net_sentiment` strictly to `[-1.0, 1.0]` (rejecting `NaN`/`Infinity` to `0.0` and `data_quality="missing"`), and unconditionally enforces `blackout_suggested = True` when `days_to_next_event <= blackout_window_days`.
+    - `MarketAnalyst`: Hallucinated numeric tokens in `evidence` trigger validation failure (`data_quality="missing"`, confidence capped at 0.3); invalidations on the wrong side of `close` fail closed to `view="neutral"` and `data_quality="missing"`.
+    - `Strategist`: Non-positive or non-finite pricing levels (`entry`, `stop`, `target`), invalid confidence outside `[0, 1]`, and `reward_to_risk < min_reward_to_risk` fail closed to `action="no_trade"`.
+  - **Deterministic Orchestrator Fan-Out (`orchestrator.py`)**:
+    - Resolved task futures in deterministic watchlist order, guaranteeing identical `envelopes` ordering regardless of thread completion timing, and isolating per-ticker exceptions.
+    - Added an explicit `kill_switch.assert_clear()` re-check immediately prior to Stage 4 order submission.
+  - **Regression Tests (`tests/test_m5_paper_and_agents.py`)**:
+    - Added 4 comprehensive adversarial tests covering unmarketable limit orders, cancellation state machine, concurrent thread safety, NaN sentiment / schema guard input rejection, mid-cycle kill switch trips, and deterministic fan-out ordering.
+- **Validation results**:
+  - Full pytest suite: **457 passed in 6.09s** on Python 3.11.9 (`.venv311`) and **457 passed in 4.08s** on Python 3.14.4 (`.venv`).
+  - Genuine pytest-cov coverage: **87.91%** (exceeding mandatory `--cov-fail-under=85`).
+  - Ruff `src`, `tests`, and `v3-zerodha/src`: `All checks passed!`.
+  - Python compileall: passed with exit code 0 on both 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked files.
+  - Zero inline `#` comments verified across all git diff additions.
+
 ## 2026-11-23 — Milestone 5 Implementation: Paper Trading Engine & 7-Agent AI Research Desk (ADR-028)
 - Implemented and verified complete Milestone 5 architecture across execution, risk, and multi-agent layers:
   - **Paper Trading Execution Layer (`src/agentic_trading/paper_trading/`)**:

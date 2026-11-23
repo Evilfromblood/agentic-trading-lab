@@ -349,3 +349,37 @@ Append decisions; do not silently rewrite historical decisions. Mark superseded 
   - Compileall: 0 errors on Python 3.11 and 3.14.
   - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files including `requirements.lock`.
   - Zero inline `#` comments verified across all git diff additions.
+
+
+## ADR-029 (Milestone 5 Adversarial Hardening: Limit Order Semantics, Thread-Safe Broker & Agent Fail-Closed Guards)
+- **Status:** Accepted (2026-11-23)
+- **Context:** Adversarial review and hardening of Milestone 5 components across execution, risk, agent intelligence, and concurrency.
+- **Decisions:**
+  1. **PaperBroker Limit Price Validation & Marketable Bounds (`broker.py`):**
+     - Immediate rejection of non-positive limit prices (`amount <= 0`) with `ValueError` and currency mismatches with `CurrencyMismatchError`.
+     - Pre-evaluation of slipped execution prices against limit orders: unmarketable BUYs (`slipped_exec_price > limit_price.amount`) and SELLs (`slipped_exec_price < limit_price.amount`) remain in `OrderStatus.PENDING` without calling `PortfolioEngine.apply_fill`, eliminating unwanted fills, ledger entries, or cash mutations.
+  2. **Explicit Order Cancellation State Machine (`cancel_order` in `broker.py`):**
+     - Allowed transitions: `PENDING` / `SUBMITTED` -> `CANCELLED` (with `reject_reason="ORDER_CANCELLED"`).
+     - Partial fills: cancels unfilled balance to `CANCELLED` without reverting executed cash or positions.
+     - Terminal rejections: attempting to cancel `FILLED`, `REJECTED`, or `CANCELLED` orders raises `ValueError`.
+  3. **Thread-Safe Broker Concurrency (`broker.py`):**
+     - Guarded all broker order lookups, submissions, cancellations, and reconciliations with `threading.RLock()`.
+     - Concurrent submissions with identical `client_order_id` synchronize cleanly, returning the identical `PaperOrder` without race conditions, duplicate ledger fills, or conservation drift.
+  4. **KillSwitch & Memory Fail-Closed Hardening (`kill_switch.py`, `memory.py`):**
+     - `KillSwitch`: `OSError` / filesystem permission errors on sentinel paths fail closed (`is_active() == True`), preventing bypass via unreadable sentinel files.
+     - `DecisionLog`: All SQLite writes and reads use parameterized queries (`?`), explicit `with conn:` transactions, and deterministic `ORDER BY id ASC` retrieval. `HumanLessonsStore` guarantees immutable tuple storage with zero mutation methods.
+  5. **Agent Input/Output Security & Prompt-Injection Hardening (`envelope.py`, `news_analyst.py`, `market_analyst.py`, `strategist.py`):**
+     - `invoke_with_schema_guard`: Catches non-finite `NaN`/`Infinity` floats or Decimals in input payloads and fails closed with `data_quality="missing"`.
+     - `NewsAnalyst`: Strips ASCII control characters from untrusted headlines and summaries, clamps `net_sentiment` strictly to `[-1.0, 1.0]` (rejecting `NaN`/`Infinity` to `0.0` and `data_quality="missing"`), and unconditionally enforces `blackout_suggested = True` when `days_to_next_event <= blackout_window_days`.
+     - `MarketAnalyst`: Hallucinated numbers in `evidence` (not found in computed metrics payload) downgrade confidence and trigger `data_quality="missing"`; invalidations on the wrong side of `close` fail closed to `view="neutral"` and `data_quality="missing"`.
+     - `Strategist`: Non-positive or non-finite pricing levels (`entry`, `stop`, `target`), invalid confidence outside `[0, 1]`, and `reward_to_risk < min_reward_to_risk` fail closed to `action="no_trade"`.
+  6. **Deterministic Orchestrator Fan-Out & Pre-Stage 4 Re-Check (`orchestrator.py`):**
+     - Resolved task futures in deterministic watchlist order, guaranteeing identical `envelopes` ordering regardless of thread completion timing, and isolating per-ticker exceptions.
+     - Added an explicit `kill_switch.assert_clear()` re-check immediately prior to Stage 4 order submission, preventing order dispatch if the switch trips mid-cycle.
+- **Verification Evidence:**
+  - Full pytest suite: **457 passed in 6.09s** on Python 3.11.9 (`.venv311`) and **457 passed in 4.08s** on Python 3.14.4 (`.venv`).
+  - Genuine pytest-cov coverage: **87.91%** (exceeding mandatory 85% requirement with `--cov-fail-under=85`).
+  - Ruff `src`, `tests`, and `v3-zerodha/src`: `All checks passed!`.
+  - Python compileall: passed with exit code 0 on both Python 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files including `requirements.lock`.
+  - Zero inline `#` comments verified across all git diff additions.

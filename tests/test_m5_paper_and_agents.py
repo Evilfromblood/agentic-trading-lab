@@ -5,11 +5,13 @@ import ast
 import io
 import json
 import os
+import threading
 import tokenize
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -38,6 +40,7 @@ from agentic_trading.agents import (
 from agentic_trading.market_data.instruments import (
     AssetClass,
     Currency,
+    CurrencyMismatchError,
     Instrument,
     Money,
 )
@@ -53,6 +56,7 @@ from agentic_trading.paper_trading import (
     KillSwitchError,
     OrderStatus,
     PaperBroker,
+    PaperOrder,
 )
 from agentic_trading.risk_engine.proposal_gate import (
     PortfolioRiskPolicy,
@@ -277,7 +281,7 @@ def test_paper_broker_kill_switch_and_rejections() -> None:
         limit_price=Money(Decimal("90.00"), Currency.INR),
     )
     limit_rej = broker.submit_order("run-l", limit_prop, bars[0])
-    assert limit_rej.status == OrderStatus.REJECTED
+    assert limit_rej.status == OrderStatus.PENDING
     assert limit_rej.reject_reason == "LIMIT_PRICE_UNMET"
 
     huge_prop = TradeProposal(
@@ -470,9 +474,26 @@ def test_market_analyst_indicator_computation_and_invalidation_guards() -> None:
 
     inv_analyst = MarketAnalyst(llm_client=DeterministicStubLLMClient(handler=inverted_handler))
     env_inv = inv_analyst.analyze(ctx_full, "r-inv")
-    assert env_inv.output["view"] == "bullish"
+    assert env_inv.output["view"] == "neutral"
+    assert env_inv.output["data_quality"] == "missing"
     assert env_inv.output["invalidation"] < float(full_bars[-1].close)
     assert len(env_inv.output["evidence"]) >= 1
+
+    def hallucinated_handler(prompt: str, payload: dict, model: str) -> str:
+        return json.dumps({
+            "view": "bullish",
+            "confidence": 0.9,
+            "evidence": ["Target price is 8888.88 which is huge"],
+            "invalidation": 90.0,
+            "risks": ["Vol"],
+            "data_quality": "ok",
+        })
+
+    hallucinated_analyst = MarketAnalyst(llm_client=DeterministicStubLLMClient(handler=hallucinated_handler))
+    env_hal = hallucinated_analyst.analyze(ctx_full, "r-hal")
+    assert env_hal.output["data_quality"] == "missing"
+    assert env_hal.output["confidence"] <= 0.3
+    assert any("UNVERIFIED NUMERIC EVIDENCE" in ev for ev in env_hal.output["evidence"])
 
 
 def test_data_analyst_staleness_and_score_clamping() -> None:
@@ -765,6 +786,319 @@ def test_orchestrator_end_to_end_desk_cycle_nse_and_nasdaq(tmp_path: Path) -> No
     assert result_nasdaq.reconciliation.is_reconciled
     assert len(result_nasdaq.orders) == 1
     assert result_nasdaq.orders[0].exchange == Exchange.NASDAQ
+
+
+def test_paper_broker_limit_order_semantics_and_cancel_state_machine() -> None:
+    engine = PortfolioEngine(Currency.INR)
+    t0 = datetime(2025, 1, 6, 9, 30, tzinfo=IST)
+    engine.deposit(Money(Decimal("100000"), Currency.INR), t0, "INITIAL")
+    broker = PaperBroker(portfolio=engine, fee_model=ZeroFeeModel())
+    inst = make_nse_instrument("LIMITCO")
+    bars = make_bars([(100, 101, 99, 100, 50000)], Exchange.NSE, "LIMITCO")
+
+    prop_bad_amount = TradeProposal(
+        proposal_id="P-BAD1",
+        strategy_id="strat",
+        instrument=inst,
+        timestamp=bars[0].close_time,
+        side="BUY",
+        quantity=10,
+        limit_price=Money(Decimal("0"), Currency.INR),
+    )
+    with pytest.raises(ValueError, match="limit_price must be positive"):
+        broker.submit_order("run-l1", prop_bad_amount, bars[0])
+
+    with pytest.raises(ValueError, match="does not match instrument currency"):
+        TradeProposal(
+            proposal_id="P-BAD2",
+            strategy_id="strat",
+            instrument=inst,
+            timestamp=bars[0].close_time,
+            side="BUY",
+            quantity=10,
+            limit_price=Money(Decimal("100"), Currency.USD),
+        )
+
+    prop_bypassed = TradeProposal(
+        proposal_id="P-BAD3",
+        strategy_id="strat",
+        instrument=inst,
+        timestamp=bars[0].close_time,
+        side="BUY",
+        quantity=10,
+        limit_price=Money(Decimal("100"), Currency.INR),
+    )
+    object.__setattr__(prop_bypassed, "limit_price", Money(Decimal("100"), Currency.USD))
+    with pytest.raises(CurrencyMismatchError):
+        broker.submit_order("run-l2", prop_bypassed, bars[0])
+
+    prop_unmkt_buy = TradeProposal(
+        proposal_id="P-UNMKT-B",
+        strategy_id="strat",
+        instrument=inst,
+        timestamp=bars[0].close_time,
+        side="BUY",
+        quantity=10,
+        limit_price=Money(Decimal("95.00"), Currency.INR),
+    )
+    order_buy = broker.submit_order("run-l3", prop_unmkt_buy, bars[0], client_order_id="order-unmkt-buy")
+    assert order_buy.status == OrderStatus.PENDING
+    assert order_buy.filled_quantity == 0
+    assert order_buy.average_fill_price is None
+    assert engine.ledger.get_cash_balance(Currency.INR).amount == Decimal("100000")
+
+    prop_unmkt_sell = TradeProposal(
+        proposal_id="P-UNMKT-S",
+        strategy_id="strat",
+        instrument=inst,
+        timestamp=bars[0].close_time,
+        side="SELL",
+        quantity=10,
+        limit_price=Money(Decimal("105.00"), Currency.INR),
+    )
+    order_sell = broker.submit_order("run-l4", prop_unmkt_sell, bars[0], client_order_id="order-unmkt-sell")
+    assert order_sell.status == OrderStatus.PENDING
+    assert order_sell.filled_quantity == 0
+
+    cancelled_order = broker.cancel_order("order-unmkt-buy")
+    assert cancelled_order.status == OrderStatus.CANCELLED
+    assert cancelled_order.reject_reason == "ORDER_CANCELLED"
+
+    with pytest.raises(ValueError, match="Cannot cancel order in terminal status"):
+        broker.cancel_order("order-unmkt-buy")
+
+    prop_mkt = TradeProposal(
+        proposal_id="P-MKT1",
+        strategy_id="strat",
+        instrument=inst,
+        timestamp=bars[0].close_time,
+        side="BUY",
+        quantity=10,
+        limit_price=Money(Decimal("105.00"), Currency.INR),
+    )
+    order_filled = broker.submit_order("run-mkt", prop_mkt, bars[0], client_order_id="order-filled")
+    assert order_filled.status == OrderStatus.FILLED
+
+    with pytest.raises(ValueError, match="Cannot cancel order in terminal status"):
+        broker.cancel_order("order-filled")
+
+    with pytest.raises(KeyError, match="not found"):
+        broker.cancel_order("nonexistent-order")
+
+
+def test_paper_broker_concurrent_submissions_thread_safety_and_conservation() -> None:
+    engine = PortfolioEngine(Currency.INR)
+    t0 = datetime(2025, 1, 6, 9, 30, tzinfo=IST)
+    engine.deposit(Money(Decimal("1000000"), Currency.INR), t0, "INITIAL")
+    broker = PaperBroker(portfolio=engine, fee_model=ZeroFeeModel())
+    inst = make_nse_instrument("RACECO")
+    bars = make_bars([(100, 102, 98, 100, 50000)], Exchange.NSE, "RACECO")
+
+    proposal = TradeProposal(
+        proposal_id="P-RACE",
+        strategy_id="strat",
+        instrument=inst,
+        timestamp=bars[0].close_time,
+        side="BUY",
+        quantity=50,
+    )
+
+    results: list[PaperOrder] = []
+    errors: list[Exception] = []
+
+    def worker() -> None:
+        try:
+            order = broker.submit_order(
+                run_id="concurrent-run",
+                proposal=proposal,
+                current_candle=bars[0],
+                client_order_id="deterministic-race-id",
+            )
+            results.append(order)
+        except (ValueError, TypeError, RuntimeError, ArithmeticError) as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(12)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+
+    assert not errors
+    assert len(results) == 12
+    assert all(o.client_order_id == "deterministic-race-id" for o in results)
+    assert all(o.status == OrderStatus.FILLED for o in results)
+
+    positions = [p for p in engine._positions.values() if p.quantity != 0]
+    assert len(positions) == 1
+    assert positions[0].quantity == 50
+
+    reconciliation = broker.reconcile(bars[0].close_time, {(Exchange.NSE, "RACECO"): Money(bars[0].close, Currency.INR)})
+    assert reconciliation.is_reconciled
+    assert len(reconciliation.discrepancies) == 0
+
+
+def test_news_analyst_nan_sentiment_and_mid_cycle_kill_switch(tmp_path: Path) -> None:
+    class NaNSentimentClient(DeterministicStubLLMClient):
+        def complete_json(self, system_prompt: str, user_payload: Mapping[str, Any], model: str) -> str:
+            return json.dumps({
+                "events": ["Test event"],
+                "scheduled": [],
+                "net_sentiment": float("nan"),
+                "blackout_suggested": False,
+                "data_quality": "ok",
+            })
+
+    nan_analyst = NewsAnalyst(NaNSentimentClient())
+    article = NewsArticle(
+        headline="CEO \x00announces record \x1fq1 profits\r\n",
+        source="Newswire",
+        source_tier=1,
+        published_at=datetime(2025, 1, 6, 9, 0, tzinfo=IST),
+        summary="Cleaned summary \x07text",
+    )
+    env = nan_analyst.analyze([article], [], "NANCO", datetime(2025, 1, 6, 9, 30, tzinfo=IST), "run-nan")
+    assert env.output["net_sentiment"] == 0.0
+    assert env.output["data_quality"] == "missing"
+
+    bad_payload = {"bad_float": float("nan")}
+    guard_env = invoke_with_schema_guard(
+        run_id="run-guard",
+        agent="test_agent",
+        agent_version="1.0.0",
+        prompt_version="1.0.0",
+        model="test",
+        ticker="NANCO",
+        as_of=datetime(2025, 1, 6, 9, 30, tzinfo=IST),
+        user_payload=bad_payload,
+        caller=lambda s, p, m: "{}",
+        system_prompt="sys",
+        required_keys=("key",),
+    )
+    assert guard_env.output["data_quality"] == "missing"
+    assert "Invalid non-finite input payload" in guard_env.errors[0]
+
+    engine = PortfolioEngine(Currency.INR)
+    t0 = datetime(2025, 1, 6, 9, 30, tzinfo=IST)
+    engine.deposit(Money(Decimal("1000000"), Currency.INR), t0, "CAP")
+    stop_sentinel = tmp_path / "STOP"
+    switch = KillSwitch(stop_file=stop_sentinel)
+    broker = PaperBroker(portfolio=engine, kill_switch=switch)
+
+    class TrippingStrategist(Strategist):
+        def propose(self, *args: Any, **kwargs: Any) -> tuple[AgentEnvelope, TradeProposal | None]:
+            stop_sentinel.write_text("STOP ACTIVE", encoding="utf-8")
+            return super().propose(*args, **kwargs)
+
+    client = DeterministicStubLLMClient()
+    market_a = MarketAnalyst(client)
+    data_a = DataAnalyst(client)
+    news_a = NewsAnalyst(client)
+    scout = OpportunityScout(min_avg_volume=1000, min_price=Decimal("1.0"), max_shortlist=2)
+    strat = TrippingStrategist(client)
+    policy = PortfolioRiskPolicy(max_position_pct=Decimal("0.20"))
+    mandate = TradingMandate(allowed_exchanges=(Exchange.NSE,))
+
+    orchestrator = TradingDeskOrchestrator(
+        paper_broker=broker,
+        risk_policy=policy,
+        mandate=mandate,
+        market_analyst=market_a,
+        data_analyst=data_a,
+        news_analyst=news_a,
+        opportunity_scout=scout,
+        strategist=strat,
+    )
+
+    inst = make_nse_instrument("MIDKILL")
+    bars = make_bars([(100 + i, 102 + i, 99 + i, 101 + i, 50000) for i in range(25)], Exchange.NSE, "MIDKILL")
+    target = WatchlistTarget(
+        instrument=inst,
+        current_candle=bars[-1],
+        context=BarContext(inst, bars[-1].close_time, bars),
+        sector="FIN",
+    )
+
+    with pytest.raises(KillSwitchError, match="Stop file .* exists"):
+        orchestrator.run_cycle(
+            run_id="run-midkill",
+            as_of=bars[-1].close_time,
+            watchlist=[target],
+        )
+
+    assert len(broker.list_orders()) == 0
+
+
+def test_orchestrator_deterministic_stage1_fan_out_ordering_under_threadpool() -> None:
+    import time
+
+    class LatencyClient(DeterministicStubLLMClient):
+        def complete_json(self, system_prompt: str, user_payload: Mapping[str, Any], model: str) -> str:
+            ticker = str(user_payload.get("ticker", ""))
+            if "SYM1" in ticker:
+                time.sleep(0.04)
+            elif "SYM2" in ticker:
+                time.sleep(0.01)
+            elif "SYM3" in ticker:
+                time.sleep(0.02)
+            return super().complete_json(system_prompt, user_payload, model)
+
+    client = LatencyClient()
+    market_a = MarketAnalyst(client)
+    data_a = DataAnalyst(client)
+    news_a = NewsAnalyst(client)
+    scout = OpportunityScout(min_avg_volume=1000, min_price=Decimal("1.0"), max_shortlist=3)
+    strat = Strategist(client)
+
+    engine = PortfolioEngine(Currency.INR)
+    t0 = datetime(2025, 1, 6, 9, 30, tzinfo=IST)
+    engine.deposit(Money(Decimal("1000000"), Currency.INR), t0, "CAP")
+    broker = PaperBroker(portfolio=engine)
+    policy = PortfolioRiskPolicy(max_position_pct=Decimal("0.20"))
+    mandate = TradingMandate(allowed_exchanges=(Exchange.NSE,))
+
+    orchestrator = TradingDeskOrchestrator(
+        paper_broker=broker,
+        risk_policy=policy,
+        mandate=mandate,
+        market_analyst=market_a,
+        data_analyst=data_a,
+        news_analyst=news_a,
+        opportunity_scout=scout,
+        strategist=strat,
+        max_workers=4,
+    )
+
+    tickers = ["SYM1", "SYM2", "SYM3"]
+    watchlist: list[WatchlistTarget] = []
+    for sym in tickers:
+        inst = make_nse_instrument(sym)
+        bars = make_bars([(100 + i, 102 + i, 99 + i, 101 + i, 50000) for i in range(25)], Exchange.NSE, sym)
+        watchlist.append(
+            WatchlistTarget(
+                instrument=inst,
+                current_candle=bars[-1],
+                context=BarContext(inst, bars[-1].close_time, bars),
+                sector="TECH",
+            )
+        )
+
+    result = orchestrator.run_cycle(
+        run_id="deterministic-run",
+        as_of=watchlist[0].current_candle.close_time,
+        watchlist=watchlist,
+    )
+
+    market_tickers = [sym for (agent, sym) in result.envelopes.keys() if agent == "market"]
+    assert market_tickers == ["SYM1", "SYM2", "SYM3"]
+
+    expected_keys = [
+        ("market", "SYM1"), ("data", "SYM1"), ("news", "SYM1"),
+        ("market", "SYM2"), ("data", "SYM2"), ("news", "SYM2"),
+        ("market", "SYM3"), ("data", "SYM3"), ("news", "SYM3"),
+    ]
+    actual_fanout_keys = [k for k in result.envelopes.keys() if k[0] in {"market", "data", "news"}]
+    assert actual_fanout_keys == expected_keys
 
 
 def test_m5_sources_have_no_inline_comments_or_forbidden_imports() -> None:

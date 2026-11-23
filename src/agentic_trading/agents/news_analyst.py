@@ -24,6 +24,10 @@ Extract factual events, evaluate overall sentiment, and return a structured JSON
 """
 
 
+def _clean_text(text: str) -> str:
+    return "".join(c for c in text if c >= " " or c in "\t\n\r").strip()
+
+
 @dataclass(frozen=True)
 class NewsArticle:
     headline: str
@@ -78,15 +82,17 @@ class NewsAnalyst:
         seen_headlines: set[str] = set()
         deduped_articles: list[dict[str, Any]] = []
         for art in articles:
-            key = art.headline.strip().lower()
+            clean_hl = _clean_text(art.headline)
+            clean_summary = _clean_text(art.summary)
+            key = clean_hl.strip().lower()
             if key not in seen_headlines:
                 seen_headlines.add(key)
                 deduped_articles.append({
-                    "headline": art.headline,
+                    "headline": clean_hl,
                     "source": art.source,
                     "source_tier": art.source_tier,
                     "published_at": art.published_at.isoformat(),
-                    "summary": art.summary,
+                    "summary": clean_summary,
                 })
 
         as_of_date = as_of.date()
@@ -129,11 +135,17 @@ class NewsAnalyst:
         )
 
         out = dict(envelope.output)
+        raw_sentiment = out.get("net_sentiment", 0.0)
         try:
-            sentiment = float(out.get("net_sentiment", 0.0))
-            sentiment = max(-1.0, min(1.0, sentiment))
+            sentiment_val = float(raw_sentiment)
+            if sentiment_val != sentiment_val or sentiment_val in (float("inf"), float("-inf")):
+                sentiment = 0.0
+                out["data_quality"] = "missing"
+            else:
+                sentiment = max(-1.0, min(1.0, sentiment_val))
         except (ValueError, TypeError):
             sentiment = 0.0
+            out["data_quality"] = "missing"
         out["net_sentiment"] = sentiment
 
         blackout = bool(out.get("blackout_suggested", False))
