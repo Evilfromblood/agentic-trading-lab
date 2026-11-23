@@ -635,3 +635,34 @@ Append decisions; do not silently rewrite historical decisions. Mark superseded 
   5. **Regression Verification (`tests/test_m6_api_and_dashboard.py`, `tests/test_e2e_platform_audit.py`):**
      - Added comprehensive regression tests verifying cycle trace capture, summary listing, detail retrieval, invalid run_id rejection (400), nonexistent run_id handling (404), and UI DOM element assertions with zero inline `#` comments.
 - **Consequences:** Provides complete auditability and interactive review of multi-agent paper trading cycles and agent reasoning directly within the local dashboard without leaking credentials or compromising isolation.
+
+
+## ADR-038 (Auto-Buy Toggle, AI Buy/Sell Price Plan Cards & Candlestick Chart with AI Overlays)
+- **Status:** Accepted (2026-11-24)
+- **Context:** While the 7-agent research desk produces structured trade recommendations, human operators required granular control to preview AI trade plans before paper orders execute, review modeled entry brackets, target upside, and stop loss risks, and inspect historical OHLCV candlesticks with overlaid AI price levels directly inside the local dashboard.
+- **Decisions:**
+  1. **Conditional Order Execution & Plan Status in Orchestrator (`src/agentic_trading/agents/orchestrator.py`):**
+     - Added `auto_execute: bool = True` parameter to `TradingDeskOrchestrator.run_cycle`.
+     - When `auto_execute=True` and risk gate approves: submits paper order to `PaperBroker` (`status="executed"`), records `"Stage 4 · Risk & Execution"` in `chat_trace`.
+     - When `auto_execute=False` and risk gate approves: skips `broker.submit_order`, marks trade plan status as `"planned"`, and records `"Stage 4 · Risk & Plan Preview"` in `chat_trace`.
+     - Added `trade_plans: tuple[dict[str, Any], ...]` and `candle_series: Mapping[str, tuple[dict[str, Any], ...]]` to `DeskCycleResult`.
+     - Built comprehensive `trade_plans` across all watchlist symbols (covering executed orders, planned orders, rejected proposals, no-trade signals, and dropped candidates) capturing `symbol`, `exchange`, `currency`, `action`, `status`, `current_price`, `buy_price`, `sell_target`, `stop_loss`, `quantity`, `reward_to_risk`, `confidence`, `rationale`, `risk_reasons`, and `executed_order_id`.
+     - Captured exact input OHLCV bars in `candle_series` for every analyzed ticker.
+  2. **Backward-Compatible SQLite Persistence & Migration (`src/agentic_trading/agents/memory.py`):**
+     - Extended `cycle_runs` table schema in `DecisionLog._init_sqlite` with `auto_buy INTEGER DEFAULT 1`, `trade_plans_json TEXT DEFAULT '[]'`, and `candle_series_json TEXT DEFAULT '{}'`.
+     - Implemented dynamic SQLite migration via `ALTER TABLE cycle_runs ADD COLUMN ...` inside `try...except sqlite3.OperationalError` blocks, enabling non-destructive zero-downtime upgrades of existing test databases.
+     - Updated `save_cycle_run`, `list_cycle_runs`, and `get_cycle_run` to persist and retrieve `auto_buy`, `trade_plans`, and `candle_series`.
+  3. **Pydantic v2 Schemas & REST APIs (`src/agentic_trading/api/{schemas.py,state.py,routes.py}`):**
+     - Added `CandleBarItem` and `TradePlanItem` schemas with `extra="forbid"`.
+     - Added `auto_buy: bool = True` to `DeskRunRequest` and passed through to `orchestrator.run_cycle(auto_execute=request.auto_buy)`.
+     - Extended `DeskRunResponse` and `CycleDetailResponse` with `auto_buy`, `trade_plans`, and `candle_series`.
+     - Extended `CycleSummaryItem` with `auto_buy: bool = True`.
+     - Populated `candles: list[CandleBarItem]` in `FeedCandlesResponse` (`GET /api/feed/{exchange}/{symbol}`).
+  4. **Interactive Dashboard UI Redesign (`src/agentic_trading/api/dashboard.py`):**
+     - **Auto-Buy Toggle Switch:** Positioned beside the "Run Desk" button (`<input type="checkbox" id="autoBuyToggle" checked>`) with smooth toggle transitions and dynamic text ("Auto-Buy ON" in accent blue vs "Auto-Buy OFF" in amber).
+     - **AI Trade Plans Card (`tradePlansContainer`):** Structured table displaying Symbol, Status badge (`EXECUTED`, `READY TO BUY`, `RISK BLOCKED`, `NO TRADE`, `DROPPED`), Current Price, Buy Price (sky-blue highlight), Sell Target (green with upside % e.g. `+4.9%`), Stop Loss (red with risk % e.g. `-2.8%`), Qty & R:R (`12 shs | R:R 1.71`), Rationale, and interactive **`Execute Paper Buy`** button for planned items submitting `POST /api/orders`.
+     - **Candlestick Chart with AI Overlays (`candlestickCanvas`):** Self-contained HTML5 `<canvas>` rendering OHLC green/red candles and wicks, ticker selector pills (`#chartTickerPills`), horizontal dashed AI levels (`BUY`, `SELL TARGET`, `STOP LOSS`) with right-margin price ticks, translucent shaded reward band (`rgba(34, 197, 94, 0.07)`) and risk band (`rgba(239, 68, 68, 0.07)`), and interactive mousemove crosshair with instant OHLCV readout (`#chartReadoutBar`).
+     - Maintained zero external CDN scripts/styles and strict DOM manipulation via `document.createElement` and `textContent`.
+  5. **Regression Verification (`tests/test_m6_api_and_dashboard.py`, `tests/test_e2e_platform_audit.py`):**
+     - Added regression tests verifying `auto_buy=False` non-execution and planned status, manual paper buy order execution from plan parameters, `auto_buy=True` automatic execution, candle feed serialization, canvas chart DOM elements, and zero inline `#` comments.
+- **Consequences:** Provides human operators with discretionary control to review and confirm AI trade brackets before paper capital is deployed, while enhancing market situational awareness through native candlestick visualization.

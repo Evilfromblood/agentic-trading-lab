@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import concurrent.futures
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -57,6 +57,8 @@ class DeskCycleResult:
     reconciliation: ReconciliationReport
     report: str
     chat_trace: tuple[dict[str, Any], ...] = ()
+    trade_plans: tuple[dict[str, Any], ...] = ()
+    candle_series: Mapping[str, tuple[dict[str, Any], ...]] = field(default_factory=dict)
 
 
 def _strip_control_chars(obj: Any) -> Any:
@@ -104,16 +106,33 @@ class TradingDeskOrchestrator:
         as_of: datetime,
         watchlist: Sequence[WatchlistTarget],
         sector_map: Mapping[str, str] | None = None,
+        auto_execute: bool = True,
     ) -> DeskCycleResult:
         self.paper_broker.kill_switch.assert_clear()
 
         currency = self.paper_broker.portfolio.currency
         mark_prices: dict[tuple[Any, str], Money] = {}
         target_by_ticker: dict[str, WatchlistTarget] = {}
+        candle_series: dict[str, tuple[dict[str, Any], ...]] = {}
         for t in watchlist:
             key = (t.instrument.exchange, t.instrument.symbol)
             mark_prices[key] = Money(t.current_candle.close, t.instrument.currency)
             target_by_ticker[t.instrument.symbol] = t
+            candle_series[t.instrument.symbol] = tuple(
+                {
+                    "timestamp": b.timestamp.isoformat(),
+                    "open": str(b.open),
+                    "high": str(b.high),
+                    "low": str(b.low),
+                    "close": str(b.close),
+                    "volume": b.volume,
+                }
+                for b in t.context.bars
+            )
+
+        for pos_key, pos in self.paper_broker.portfolio._positions.items():
+            if pos.quantity != 0 and pos_key not in mark_prices:
+                mark_prices[pos_key] = pos.average_cost
 
         snapshot = self.paper_broker.portfolio.snapshot(currency, mark_prices, as_of)
         envelopes: dict[tuple[str, str], AgentEnvelope] = {}
@@ -362,6 +381,9 @@ class TradingDeskOrchestrator:
         if proposals:
             self.paper_broker.kill_switch.assert_clear()
 
+        decision_by_ticker: dict[str, ProposalRiskDecision] = {}
+        order_by_ticker: dict[str, PaperOrder] = {}
+
         current_snapshot = snapshot
         for proposal in proposals:
             sym = proposal.instrument.symbol
@@ -382,29 +404,39 @@ class TradingDeskOrchestrator:
                 event_blackout=blackout,
             )
             decisions.append(decision)
+            decision_by_ticker[sym] = decision
 
             paper_order: PaperOrder | None = None
             if decision.approved:
-                paper_order = self.paper_broker.submit_order(
-                    run_id=run_id,
-                    proposal=proposal,
-                    current_candle=target.current_candle,
-                    tick_size=target.instrument.tick_size,
-                )
-                orders.append(paper_order)
-                if target_sector:
-                    sector_counts[target_sector] = sector_counts.get(target_sector, 0) + 1
-                current_snapshot = self.paper_broker.portfolio.snapshot(currency, mark_prices, as_of)
-                daily_pnl = Money(current_snapshot.realized_pnl.amount + current_snapshot.unrealized_pnl.amount, currency)
-                if current_snapshot.total_equity.amount > peak_equity.amount:
-                    peak_equity = current_snapshot.total_equity
+                if auto_execute:
+                    paper_order = self.paper_broker.submit_order(
+                        run_id=run_id,
+                        proposal=proposal,
+                        current_candle=target.current_candle,
+                        tick_size=target.instrument.tick_size,
+                    )
+                    orders.append(paper_order)
+                    order_by_ticker[sym] = paper_order
+                    if target_sector:
+                        sector_counts[target_sector] = sector_counts.get(target_sector, 0) + 1
+                    current_snapshot = self.paper_broker.portfolio.snapshot(currency, mark_prices, as_of)
+                    daily_pnl = Money(current_snapshot.realized_pnl.amount + current_snapshot.unrealized_pnl.amount, currency)
+                    if current_snapshot.total_equity.amount > peak_equity.amount:
+                        peak_equity = current_snapshot.total_equity
+                    stage_title = "Stage 4 · Risk & Execution"
+                    gate_status = "approved"
+                else:
+                    stage_title = "Stage 4 · Risk & Plan Preview"
+                    gate_status = "planned"
+            else:
+                stage_title = "Stage 4 · Risk & Execution"
+                gate_status = "rejected"
 
-            gate_status = "approved" if decision.approved else "rejected"
             chat_trace.append(
                 _strip_control_chars(
                     {
                         "step": step_counter,
-                        "stage": "Stage 4 · Risk & Execution",
+                        "stage": stage_title,
                         "agent": "risk_gate",
                         "symbol": sym,
                         "model": "deterministic_gate",
@@ -421,14 +453,32 @@ class TradingDeskOrchestrator:
                             "approved": decision.approved,
                             "reasons": list(decision.reasons),
                             "max_allowed_quantity": decision.max_allowed_quantity,
+                            "auto_execute": auto_execute,
                             "paper_order_id": paper_order.client_order_id if paper_order else None,
-                            "paper_order_status": paper_order.status.value if paper_order else None,
+                            "paper_order_status": paper_order.status.value if paper_order else ("PLANNED" if decision.approved else None),
                         },
                         "status": gate_status,
                     }
                 )
             )
             step_counter += 1
+
+            if paper_order:
+                paper_order_dict = {
+                    "client_order_id": paper_order.client_order_id,
+                    "status": paper_order.status.value,
+                    "filled_quantity": paper_order.filled_quantity,
+                    "average_fill_price": str(paper_order.average_fill_price),
+                }
+            elif decision.approved and not auto_execute:
+                paper_order_dict = {
+                    "client_order_id": None,
+                    "status": "PLANNED",
+                    "filled_quantity": 0,
+                    "average_fill_price": None,
+                }
+            else:
+                paper_order_dict = None
 
             record = DecisionRecord(
                 run_id=run_id,
@@ -448,16 +498,112 @@ class TradingDeskOrchestrator:
                     "reasons": decision.reasons,
                     "max_allowed_quantity": decision.max_allowed_quantity,
                 },
-                paper_order={
-                    "client_order_id": paper_order.client_order_id,
-                    "status": paper_order.status.value,
-                    "filled_quantity": paper_order.filled_quantity,
-                    "average_fill_price": str(paper_order.average_fill_price),
-                }
-                if paper_order
-                else None,
+                paper_order=paper_order_dict,
             )
             self.decision_log.append(record)
+
+        trade_plans: list[dict[str, Any]] = []
+        for t in watchlist:
+            sym = t.instrument.symbol
+            curr_price = t.current_candle.close
+            ex_str = t.instrument.exchange.value
+            curr_str = t.instrument.currency.value
+
+            if sym not in scout_result.shortlist:
+                trade_plans.append(
+                    {
+                        "symbol": sym,
+                        "exchange": ex_str,
+                        "currency": curr_str,
+                        "action": "no_trade",
+                        "status": "no_trade",
+                        "current_price": str(curr_price),
+                        "buy_price": None,
+                        "sell_target": None,
+                        "stop_loss": None,
+                        "quantity": 0,
+                        "reward_to_risk": None,
+                        "confidence": "0",
+                        "rationale": str(scout_result.dropped.get(sym, "Dropped during candidate screening")),
+                        "risk_reasons": [],
+                        "executed_order_id": None,
+                    }
+                )
+            elif sym not in proposal_by_ticker:
+                strat_env = envelopes.get(("strategist", sym))
+                strat_out = strat_env.output if strat_env else {}
+                trade_plans.append(
+                    {
+                        "symbol": sym,
+                        "exchange": ex_str,
+                        "currency": curr_str,
+                        "action": "no_trade",
+                        "status": "no_trade",
+                        "current_price": str(curr_price),
+                        "buy_price": None,
+                        "sell_target": None,
+                        "stop_loss": None,
+                        "quantity": 0,
+                        "reward_to_risk": None,
+                        "confidence": str(strat_out.get("confidence", "0")),
+                        "rationale": str(strat_out.get("disagreement", "") or strat_out.get("thesis", "No trade proposed")),
+                        "risk_reasons": [],
+                        "executed_order_id": None,
+                    }
+                )
+            else:
+                prop = proposal_by_ticker[sym]
+                dec = decision_by_ticker[sym]
+                strat_env = envelopes[("strategist", sym)]
+                strat_out = strat_env.output
+                buy_price = curr_price
+                stop_loss = prop.stop_loss.amount if prop.stop_loss else None
+                sell_target = prop.take_profit.amount if prop.take_profit else None
+                qty = dec.max_allowed_quantity if dec.approved else prop.quantity
+                r_to_r_str: str | None = None
+                if stop_loss and sell_target and buy_price > stop_loss:
+                    risk_amt = buy_price - stop_loss
+                    reward_amt = sell_target - buy_price
+                    if risk_amt > Decimal("0"):
+                        r_to_r_val = reward_amt / risk_amt
+                        r_to_r_str = str(round(r_to_r_val, 2))
+
+                conf_str = str(strat_out.get("confidence", "0.85"))
+                rat_str = str(strat_out.get("thesis", "") or strat_out.get("reasoning", "Buy proposal formulated"))
+
+                if dec.approved:
+                    order = order_by_ticker.get(sym)
+                    if auto_execute and order:
+                        plan_status = "executed"
+                        exec_id = order.client_order_id
+                    else:
+                        plan_status = "planned"
+                        exec_id = None
+                    risk_reasons_list: list[str] = []
+                else:
+                    plan_status = "rejected"
+                    exec_id = None
+                    risk_reasons_list = list(dec.reasons)
+
+                trade_plans.append(
+                    {
+                        "symbol": sym,
+                        "exchange": ex_str,
+                        "currency": curr_str,
+                        "action": "buy",
+                        "status": plan_status,
+                        "current_price": str(curr_price),
+                        "buy_price": str(buy_price),
+                        "sell_target": str(sell_target) if sell_target else None,
+                        "stop_loss": str(stop_loss) if stop_loss else None,
+                        "quantity": qty,
+                        "reward_to_risk": r_to_r_str,
+                        "confidence": conf_str,
+                        "rationale": rat_str,
+                        "risk_reasons": risk_reasons_list,
+                        "executed_order_id": exec_id,
+                    }
+                )
 
         reconciliation = self.paper_broker.reconcile(as_of, mark_prices)
         report = DailyReporter.generate_eod_report(
@@ -482,4 +628,6 @@ class TradingDeskOrchestrator:
             reconciliation=reconciliation,
             report=report,
             chat_trace=tuple(chat_trace),
+            trade_plans=tuple(trade_plans),
+            candle_series=dict(candle_series),
         )

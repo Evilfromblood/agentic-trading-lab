@@ -246,8 +246,59 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     .action-buttons {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
       flex-wrap: wrap;
+    }
+    .switch-container {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+      font-size: 0.82rem;
+      font-weight: 600;
+      background: rgba(30, 41, 59, 0.7);
+      border: 1px solid var(--border);
+      padding: 5px 12px;
+      border-radius: 9999px;
+      transition: border-color 0.15s;
+    }
+    .switch-container:hover {
+      border-color: var(--border-focus);
+    }
+    .switch-input {
+      display: none;
+    }
+    .switch-slider {
+      position: relative;
+      width: 34px;
+      height: 18px;
+      background: #334155;
+      border-radius: 9999px;
+      transition: background-color 0.2s;
+    }
+    .switch-slider::before {
+      content: "";
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #f8fafc;
+      transition: transform 0.2s;
+    }
+    .switch-input:checked + .switch-slider {
+      background: var(--accent);
+    }
+    .switch-input:checked + .switch-slider::before {
+      transform: translateX(16px);
+      background: #0f172a;
+    }
+    .switch-label {
+      color: var(--accent);
+      font-size: 0.78rem;
+      letter-spacing: 0.02em;
     }
     .settings-panel {
       display: flex;
@@ -318,6 +369,60 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       gap: 6px;
       min-height: 32px;
       align-items: center;
+    }
+    .plans-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+    .plans-table th {
+      text-align: left;
+      padding: 8px 10px;
+      color: var(--text-dim);
+      border-bottom: 1px solid var(--border);
+      font-weight: 500;
+    }
+    .plans-table td {
+      padding: 8px 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      vertical-align: middle;
+    }
+    .plans-table tr:last-child td { border-bottom: none; }
+    .price-buy { color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; }
+    .price-target { color: var(--success); font-weight: 600; font-variant-numeric: tabular-nums; }
+    .price-stop { color: #fca5a5; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .ticker-pill-btn {
+      cursor: pointer;
+      padding: 3px 10px;
+      border-radius: 9999px;
+      font-size: 0.74rem;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      background: rgba(148, 163, 184, 0.1);
+      color: var(--text-muted);
+      transition: all 0.15s;
+    }
+    .ticker-pill-btn:hover { background: rgba(56, 189, 248, 0.15); color: var(--accent); }
+    .ticker-pill-btn.active {
+      background: var(--blue-bg);
+      color: var(--accent);
+      border-color: var(--border-focus);
+    }
+    .chart-readout {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.76rem;
+      color: #94a3b8;
+      padding: 6px 12px;
+      background: #080d1a;
+      border-radius: 6px;
+      border: 1px solid #172033;
+      margin-top: 8px;
+      margin-bottom: 8px;
+      min-height: 32px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
     }
     .orders-table {
       width: 100%;
@@ -482,6 +587,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div class="cycle-detail-item"><strong>ID:</strong> <span id="cycleIdText" style="font-family:monospace;color:var(--text);">—</span></div>
         <div class="cycle-detail-item"><strong>Time:</strong> <span id="cycleTimeText">—</span></div>
         <div class="cycle-detail-item"><strong>Market:</strong> <span id="cycleMarketText">—</span></div>
+        <div class="cycle-detail-item"><strong>Auto-Buy:</strong> <span id="cycleAutoBuyPill" class="pill pill-blue">—</span></div>
         <div class="cycle-detail-item"><strong>Feed:</strong> <span id="cycleFeedPill" class="pill pill-blue">—</span></div>
         <div class="cycle-detail-item"><strong>Model:</strong> <span id="cycleModelPill" class="pill pill-purple">—</span></div>
         <div class="cycle-detail-item"><strong>Watchlist:</strong> <span id="cycleWatchlistGroup" class="pill-group"></span></div>
@@ -519,6 +625,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <div class="action-bar">
       <div class="action-buttons">
         <button id="runDeskBtn" class="btn btn-primary">Run Desk</button>
+        <label class="switch-container" title="When ON, approved proposals automatically submit paper orders. When OFF, plans remain in READY TO BUY state for manual confirmation.">
+          <input type="checkbox" id="autoBuyToggle" class="switch-input" checked>
+          <span class="switch-slider"></span>
+          <span id="autoBuyLabel" class="switch-label">Auto-Buy ON</span>
+        </label>
         <button id="runBacktestBtn" class="btn btn-secondary">Run Backtest</button>
         <button id="toggleSettingsBtn" class="btn btn-ghost">Settings ▾</button>
       </div>
@@ -586,6 +697,29 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       </div>
 
       <div class="card" style="margin-bottom:16px;">
+        <div class="card-head">
+          <div class="section-title" style="margin-bottom:0;">AI Trade Plans · Buy &amp; Sell Levels</div>
+          <span style="font-size:0.74rem;color:var(--text-dim);">Entry Bracket &amp; Target Modeling</span>
+        </div>
+        <div id="tradePlansContainer" style="margin-top:10px;">
+          <div class="empty-placeholder">No trade plans recorded in this cycle</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-head">
+          <div class="section-title" style="margin-bottom:0;">Candlestick Chart · AI Levels</div>
+          <div id="chartTickerPills" class="pill-group"></div>
+        </div>
+        <div id="chartReadoutBar" class="chart-readout">
+          <span>Select a ticker to view candlestick chart and AI brackets</span>
+        </div>
+        <div style="position:relative; width:100%; height:320px; margin-top:8px;">
+          <canvas id="candlestickCanvas" width="1080" height="320" style="width:100%; height:320px; display:block; border-radius:6px; background:#0b1120;"></canvas>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px;">
         <div class="section-title">Executed Paper Orders</div>
         <div id="overviewOrdersContainer">
           <div class="empty-placeholder">No orders executed in this cycle</div>
@@ -612,6 +746,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     let killSwitchActive = false;
     let loadedCycles = [];
     let currentSelectedRunId = null;
+    let currentDetailData = null;
+    let activeChartSymbol = null;
 
     function formatMoney(amountStr, currency) {
       const num = parseFloat(amountStr);
@@ -743,18 +879,20 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     function renderStatusPill(status) {
       const pill = document.createElement("span");
       pill.className = "pill";
-      if (status === "ok" || status === "approved") {
+      if (status === "ok" || status === "approved" || status === "executed") {
         pill.classList.add("pill-success");
-      } else if (status === "rejected") {
+      } else if (status === "rejected" || status === "risk_rejected") {
         pill.classList.add("pill-danger");
+      } else if (status === "planned") {
+        pill.classList.add("pill-blue");
       } else if (status === "no_trade") {
         pill.classList.add("pill-slate");
-      } else if (status === "missing") {
+      } else if (status === "missing" || status === "dropped") {
         pill.classList.add("pill-amber");
       } else {
         pill.classList.add("pill-blue");
       }
-      pill.textContent = status;
+      pill.textContent = status === "planned" ? "READY TO BUY" : status.toUpperCase();
       return pill;
     }
 
@@ -763,6 +901,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       const ts = new Date(detail.timestamp);
       document.getElementById("cycleTimeText").textContent = isNaN(ts.getTime()) ? detail.timestamp : ts.toLocaleString();
       document.getElementById("cycleMarketText").textContent = detail.currency;
+
+      const autoBuyPill = document.getElementById("cycleAutoBuyPill");
+      const isAuto = (detail.auto_buy !== undefined) ? detail.auto_buy : true;
+      autoBuyPill.textContent = isAuto ? "Auto-Buy ON" : "Auto-Buy OFF";
+      autoBuyPill.className = isAuto ? "pill pill-success" : "pill pill-amber";
+
       document.getElementById("cycleFeedPill").textContent = detail.feed_source;
       document.getElementById("cycleModelPill").textContent = detail.llm_backend === "ollama" ? detail.ollama_model : detail.llm_backend;
 
@@ -774,6 +918,405 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         p.textContent = sym;
         wlGroup.appendChild(p);
       });
+    }
+
+    async function submitPlannedOrder(plan) {
+      if (!plan) return;
+      showStatus("Submitting paper order for " + plan.symbol + " (qty: " + plan.quantity + ")...", false);
+      try {
+        const res = await fetch("/api/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            run_id: currentSelectedRunId || "manual",
+            exchange: plan.exchange,
+            symbol: plan.symbol,
+            side: "BUY",
+            quantity: plan.quantity,
+            quote_price: plan.current_price,
+            stop_loss: plan.stop_loss,
+            take_profit: plan.sell_target
+          })
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          showStatus("Order submission failed: " + (err.detail || res.statusText), true);
+          return;
+        }
+        const data = await res.json();
+        showStatus("Order " + data.client_order_id + " executed successfully", false);
+        await refreshAll();
+        if (currentSelectedRunId) {
+          await loadCycleDetail(currentSelectedRunId);
+        }
+      } catch (err) {
+        showStatus("Order execution error: " + err, true);
+      }
+    }
+
+    function renderTradePlans(detail) {
+      const container = document.getElementById("tradePlansContainer");
+      while (container.firstChild) container.removeChild(container.firstChild);
+
+      const plans = detail.trade_plans || [];
+      if (plans.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty-placeholder";
+        empty.textContent = "No trade plans recorded for this cycle";
+        container.appendChild(empty);
+        return;
+      }
+
+      const table = document.createElement("table");
+      table.className = "plans-table";
+      const thead = document.createElement("thead");
+      const trHead = document.createElement("tr");
+      ["Symbol", "Status", "Current", "Buy Price", "Sell Target", "Stop Loss", "Qty & R:R", "Rationale", "Action"].forEach(h => {
+        const th = document.createElement("th");
+        th.textContent = h;
+        trHead.appendChild(th);
+      });
+      thead.appendChild(trHead);
+      table.appendChild(thead);
+
+      const tbody = document.createElement("tbody");
+      plans.forEach(p => {
+        const tr = document.createElement("tr");
+
+        const tdSym = document.createElement("td");
+        tdSym.style.fontWeight = "700";
+        tdSym.textContent = p.symbol;
+        tr.appendChild(tdSym);
+
+        const tdStat = document.createElement("td");
+        tdStat.appendChild(renderStatusPill(p.status));
+        tr.appendChild(tdStat);
+
+        const tdCurr = document.createElement("td");
+        tdCurr.style.fontVariantNumeric = "tabular-nums";
+        tdCurr.textContent = p.current_price ? Number(p.current_price).toFixed(2) : "—";
+        tr.appendChild(tdCurr);
+
+        const tdBuy = document.createElement("td");
+        tdBuy.className = "price-buy";
+        tdBuy.textContent = p.buy_price ? Number(p.buy_price).toFixed(2) : "—";
+        tr.appendChild(tdBuy);
+
+        const tdTarget = document.createElement("td");
+        tdTarget.className = "price-target";
+        if (p.sell_target) {
+          const tVal = Number(p.sell_target);
+          const bVal = Number(p.buy_price || p.current_price || 1);
+          const pct = (((tVal - bVal) / bVal) * 100).toFixed(1);
+          tdTarget.textContent = tVal.toFixed(2) + " (+" + pct + "%)";
+        } else {
+          tdTarget.textContent = "—";
+        }
+        tr.appendChild(tdTarget);
+
+        const tdStop = document.createElement("td");
+        tdStop.className = "price-stop";
+        if (p.stop_loss) {
+          const sVal = Number(p.stop_loss);
+          const bVal = Number(p.buy_price || p.current_price || 1);
+          const pct = (((sVal - bVal) / bVal) * 100).toFixed(1);
+          tdStop.textContent = sVal.toFixed(2) + " (" + pct + "%)";
+        } else {
+          tdStop.textContent = "—";
+        }
+        tr.appendChild(tdStop);
+
+        const tdQty = document.createElement("td");
+        if (p.quantity && p.quantity > 0) {
+          const rrStr = p.reward_to_risk ? " | R:R " + Number(p.reward_to_risk).toFixed(2) : "";
+          tdQty.textContent = p.quantity + " shs" + rrStr;
+        } else {
+          tdQty.textContent = "—";
+        }
+        tr.appendChild(tdQty);
+
+        const tdRat = document.createElement("td");
+        tdRat.style.fontSize = "0.76rem";
+        tdRat.style.color = "var(--text-muted)";
+        tdRat.style.maxWidth = "220px";
+        const ratText = p.rationale || (p.risk_reasons && p.risk_reasons.length > 0 ? p.risk_reasons.join("; ") : "No action suggested");
+        tdRat.textContent = ratText;
+        tr.appendChild(tdRat);
+
+        const tdAct = document.createElement("td");
+        if (p.status === "planned") {
+          const execBtn = document.createElement("button");
+          execBtn.className = "btn btn-primary btn-sm";
+          execBtn.textContent = "Execute Paper Buy";
+          execBtn.addEventListener("click", () => submitPlannedOrder(p));
+          tdAct.appendChild(execBtn);
+        } else if (p.status === "executed") {
+          const span = document.createElement("span");
+          span.style.fontSize = "0.74rem";
+          span.style.color = "var(--success)";
+          span.textContent = p.executed_order_id ? "Order: " + p.executed_order_id.slice(-8) : "Filled";
+          tdAct.appendChild(span);
+        } else {
+          const span = document.createElement("span");
+          span.style.fontSize = "0.74rem";
+          span.style.color = "var(--text-dim)";
+          span.textContent = "No action";
+          tdAct.appendChild(span);
+        }
+        tr.appendChild(tdAct);
+
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      container.appendChild(table);
+    }
+
+    function setupCandlestickChart(detail) {
+      const pillsContainer = document.getElementById("chartTickerPills");
+      while (pillsContainer.firstChild) pillsContainer.removeChild(pillsContainer.firstChild);
+
+      const seriesMap = detail.candle_series || {};
+      const symbols = Object.keys(seriesMap);
+
+      if (symbols.length === 0) {
+        document.getElementById("chartReadoutBar").textContent = "No candlestick series recorded for this cycle";
+        drawEmptyChart("No candlestick series available");
+        return;
+      }
+
+      if (!activeChartSymbol || !symbols.includes(activeChartSymbol)) {
+        activeChartSymbol = symbols[0];
+      }
+
+      symbols.forEach(sym => {
+        const btn = document.createElement("button");
+        btn.className = "ticker-pill-btn" + (sym === activeChartSymbol ? " active" : "");
+        btn.textContent = sym;
+        btn.addEventListener("click", () => {
+          activeChartSymbol = sym;
+          const allBtns = pillsContainer.querySelectorAll(".ticker-pill-btn");
+          allBtns.forEach(b => b.classList.remove("active"));
+          btn.classList.add("active");
+          renderSelectedChart();
+        });
+        pillsContainer.appendChild(btn);
+      });
+
+      renderSelectedChart();
+    }
+
+    function drawEmptyChart(msg) {
+      const canvas = document.getElementById("candlestickCanvas");
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#0b1120";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#64748b";
+      ctx.font = "14px -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(msg, canvas.width / 2, canvas.height / 2);
+    }
+
+    function renderSelectedChart() {
+      if (!currentDetailData || !activeChartSymbol) return;
+      const seriesMap = currentDetailData.candle_series || {};
+      const bars = seriesMap[activeChartSymbol] || [];
+      const plans = currentDetailData.trade_plans || [];
+      const plan = plans.find(p => p.symbol === activeChartSymbol) || null;
+
+      const canvas = document.getElementById("candlestickCanvas");
+      const ctx = canvas.getContext("2d");
+      const width = canvas.width;
+      const height = canvas.height;
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#0b1120";
+      ctx.fillRect(0, 0, width, height);
+
+      if (bars.length === 0) {
+        drawEmptyChart("No candle bars for " + activeChartSymbol);
+        return;
+      }
+
+      const padTop = 24;
+      const padBottom = 28;
+      const padLeft = 20;
+      const padRight = 110;
+      const plotWidth = width - padLeft - padRight;
+      const plotHeight = height - padTop - padBottom;
+
+      let minP = Infinity;
+      let maxP = -Infinity;
+      bars.forEach(b => {
+        const l = Number(b.low);
+        const h = Number(b.high);
+        if (l < minP) minP = l;
+        if (h > maxP) maxP = h;
+      });
+
+      if (plan) {
+        if (plan.buy_price) {
+          const bp = Number(plan.buy_price);
+          if (bp < minP) minP = bp;
+          if (bp > maxP) maxP = bp;
+        }
+        if (plan.sell_target) {
+          const st = Number(plan.sell_target);
+          if (st < minP) minP = st;
+          if (st > maxP) maxP = st;
+        }
+        if (plan.stop_loss) {
+          const sl = Number(plan.stop_loss);
+          if (sl < minP) minP = sl;
+          if (sl > maxP) maxP = sl;
+        }
+      }
+
+      const pRange = (maxP - minP) || 1.0;
+      minP -= pRange * 0.04;
+      maxP += pRange * 0.04;
+      const fullRange = maxP - minP;
+
+      function scaleY(p) {
+        return padTop + (1.0 - (p - minP) / fullRange) * plotHeight;
+      }
+
+      ctx.fillStyle = "rgba(255, 255, 255, 0.03)";
+      ctx.fillRect(padLeft, padTop, plotWidth, plotHeight);
+
+      if (plan && plan.buy_price && plan.sell_target) {
+        const yBuy = scaleY(Number(plan.buy_price));
+        const yTarget = scaleY(Number(plan.sell_target));
+        ctx.fillStyle = "rgba(34, 197, 94, 0.07)";
+        ctx.fillRect(padLeft, Math.min(yBuy, yTarget), plotWidth, Math.abs(yBuy - yTarget));
+      }
+      if (plan && plan.buy_price && plan.stop_loss) {
+        const yBuy = scaleY(Number(plan.buy_price));
+        const yStop = scaleY(Number(plan.stop_loss));
+        ctx.fillStyle = "rgba(239, 68, 68, 0.07)";
+        ctx.fillRect(padLeft, Math.min(yBuy, yStop), plotWidth, Math.abs(yBuy - yStop));
+      }
+
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
+      ctx.lineWidth = 1;
+      ctx.fillStyle = "#64748b";
+      ctx.font = "10px monospace";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+
+      const gridSteps = 5;
+      for (let s = 0; s <= gridSteps; s++) {
+        const val = minP + (fullRange * (s / gridSteps));
+        const y = scaleY(val);
+        ctx.beginPath();
+        ctx.moveTo(padLeft, y);
+        ctx.lineTo(padLeft + plotWidth, y);
+        ctx.stroke();
+        ctx.fillText(val.toFixed(2), padLeft + plotWidth + 8, y);
+      }
+
+      const barSlot = plotWidth / bars.length;
+      const candleWidth = Math.max(Math.min(barSlot * 0.65, 18), 3);
+
+      bars.forEach((b, idx) => {
+        const x = padLeft + (idx + 0.5) * barSlot;
+        const o = Number(b.open);
+        const h = Number(b.high);
+        const l = Number(b.low);
+        const c = Number(b.close);
+
+        const yOpen = scaleY(o);
+        const yClose = scaleY(c);
+        const yHigh = scaleY(h);
+        const yLow = scaleY(l);
+
+        const isBull = c >= o;
+        const color = isBull ? "#22c55e" : "#ef4444";
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(x, yHigh);
+        ctx.lineTo(x, yLow);
+        ctx.stroke();
+
+        ctx.fillStyle = color;
+        const bodyTop = Math.min(yOpen, yClose);
+        const bodyHeight = Math.max(Math.abs(yClose - yOpen), 1.5);
+        ctx.fillRect(x - candleWidth / 2, bodyTop, candleWidth, bodyHeight);
+      });
+
+      if (plan) {
+        ctx.lineWidth = 1.5;
+        ctx.font = "bold 10px monospace";
+        ctx.setLineDash([4, 4]);
+
+        if (plan.sell_target) {
+          const y = scaleY(Number(plan.sell_target));
+          ctx.strokeStyle = "#22c55e";
+          ctx.beginPath();
+          ctx.moveTo(padLeft, y);
+          ctx.lineTo(padLeft + plotWidth, y);
+          ctx.stroke();
+          ctx.fillStyle = "#22c55e";
+          const label = "TARGET: " + Number(plan.sell_target).toFixed(2);
+          ctx.fillText(label, padLeft + plotWidth + 8, y);
+        }
+
+        if (plan.buy_price) {
+          const y = scaleY(Number(plan.buy_price));
+          ctx.strokeStyle = "#38bdf8";
+          ctx.beginPath();
+          ctx.moveTo(padLeft, y);
+          ctx.lineTo(padLeft + plotWidth, y);
+          ctx.stroke();
+          ctx.fillStyle = "#38bdf8";
+          const label = "BUY: " + Number(plan.buy_price).toFixed(2);
+          ctx.fillText(label, padLeft + plotWidth + 8, y);
+        }
+
+        if (plan.stop_loss) {
+          const y = scaleY(Number(plan.stop_loss));
+          ctx.strokeStyle = "#ef4444";
+          ctx.beginPath();
+          ctx.moveTo(padLeft, y);
+          ctx.lineTo(padLeft + plotWidth, y);
+          ctx.stroke();
+          ctx.fillStyle = "#ef4444";
+          const label = "STOP: " + Number(plan.stop_loss).toFixed(2);
+          ctx.fillText(label, padLeft + plotWidth + 8, y);
+        }
+
+        ctx.setLineDash([]);
+      }
+
+      const readout = document.getElementById("chartReadoutBar");
+      const latestBar = bars[bars.length - 1];
+      const planStr = plan && plan.buy_price
+        ? " | Buy: " + Number(plan.buy_price).toFixed(2) + " · Target: " + Number(plan.sell_target || 0).toFixed(2) + " · Stop: " + Number(plan.stop_loss || 0).toFixed(2)
+        : "";
+      readout.textContent = activeChartSymbol + " · Latest: " + Number(latestBar.close).toFixed(2) + " (" + (latestBar.timestamp || "").slice(0, 10) + ")" + planStr;
+
+      canvas.onmousemove = function(ev) {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = (ev.clientX - rect.left) * (canvas.width / rect.width);
+        const mouseY = (ev.clientY - rect.top) * (canvas.height / rect.height);
+
+        if (mouseX >= padLeft && mouseX <= padLeft + plotWidth && mouseY >= padTop && mouseY <= padTop + plotHeight) {
+          const relX = mouseX - padLeft;
+          const idx = Math.floor(relX / barSlot);
+          if (idx >= 0 && idx < bars.length) {
+            const b = bars[idx];
+            const tsDate = (b.timestamp || "").slice(0, 10);
+            readout.textContent = activeChartSymbol + " · " + tsDate + " · O: " + Number(b.open).toFixed(2) + " · H: " + Number(b.high).toFixed(2) + " · L: " + Number(b.low).toFixed(2) + " · C: " + Number(b.close).toFixed(2) + " · Vol: " + Number(b.volume).toLocaleString();
+          }
+        }
+      };
+
+      canvas.onmouseleave = function() {
+        readout.textContent = activeChartSymbol + " · Latest: " + Number(latestBar.close).toFixed(2) + " (" + (latestBar.timestamp || "").slice(0, 10) + ")" + planStr;
+      };
     }
 
     function renderOverview(detail) {
@@ -829,6 +1372,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         span.textContent = "Zero risk rejections";
         rejectionsContainer.appendChild(span);
       }
+
+      renderTradePlans(detail);
+      setupCandlestickChart(detail);
 
       const ordersContainer = document.getElementById("overviewOrdersContainer");
       while (ordersContainer.firstChild) ordersContainer.removeChild(ordersContainer.firstChild);
@@ -980,6 +1526,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           return;
         }
         const detail = await res.json();
+        currentDetailData = detail;
         updateCycleStrip(detail);
         renderOverview(detail);
         renderAgentChat(detail);
@@ -1009,7 +1556,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           opt.value = c.run_id;
           const ts = new Date(c.timestamp);
           const timeStr = isNaN(ts.getTime()) ? c.timestamp : ts.toLocaleTimeString();
-          opt.textContent = c.run_id + " (" + timeStr + ", " + c.currency + ")";
+          const autoStr = c.auto_buy === false ? ", Auto-Off" : "";
+          opt.textContent = c.run_id + " (" + timeStr + ", " + c.currency + autoStr + ")";
           sel.appendChild(opt);
         });
 
@@ -1034,8 +1582,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       const feedSource = document.getElementById("feedSourceSelect").value;
       const llmBackend = document.getElementById("llmBackendSelect").value;
       const ollamaModel = document.getElementById("ollamaModelInput").value.trim() || "gemma4:12b";
+      const autoBuy = document.getElementById("autoBuyToggle").checked;
 
-      showStatus("Initiating 7-Agent Research Desk cycle (" + feedSource + ", " + llmBackend + ")...", false);
+      showStatus("Initiating 7-Agent Research Desk cycle (" + feedSource + ", auto-buy=" + autoBuy + ")...", false);
       try {
         const res = await fetch("/api/desk/run", {
           method: "POST",
@@ -1046,7 +1595,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             currency: currency,
             feed_source: feedSource,
             llm_backend: llmBackend,
-            ollama_model: ollamaModel
+            ollama_model: ollamaModel,
+            auto_buy: autoBuy
           })
         });
         if (!res.ok) {
@@ -1133,6 +1683,16 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     }
 
     document.getElementById("toggleKillBtn").addEventListener("click", toggleKillSwitch);
+    document.getElementById("autoBuyToggle").addEventListener("change", (e) => {
+      const label = document.getElementById("autoBuyLabel");
+      if (e.target.checked) {
+        label.textContent = "Auto-Buy ON";
+        label.style.color = "var(--accent)";
+      } else {
+        label.textContent = "Auto-Buy OFF";
+        label.style.color = "var(--amber)";
+      }
+    });
     document.getElementById("runDeskBtn").addEventListener("click", runDeskCycle);
     document.getElementById("runBacktestBtn").addEventListener("click", runBacktest);
     document.getElementById("toggleSettingsBtn").addEventListener("click", toggleSettings);

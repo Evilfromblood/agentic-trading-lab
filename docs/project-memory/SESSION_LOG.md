@@ -2,6 +2,35 @@
 
 Append concise entries in reverse chronological order. Record verified outcomes, not intentions.
 
+## 2026-11-24 — Auto-Buy Toggle, AI Buy/Sell Price Plan Cards & Candlestick Chart with AI Overlays (ADR-038)
+- Implemented ADR-038 adding Auto-Buy toggle control, AI Buy & Sell Price Plan cards, and interactive HTML5 `<canvas>` Candlestick Chart with AI Overlays:
+  - **Conditional Order Execution & Plan Status (`orchestrator.py`)**:
+    - Added `auto_execute: bool = True` to `TradingDeskOrchestrator.run_cycle`.
+    - When `auto_execute=True` and risk gate approves: submits paper order to `PaperBroker` (`status="executed"`), records `"Stage 4 · Risk & Execution"` in `chat_trace`.
+    - When `auto_execute=False` and risk gate approves: skips `broker.submit_order`, marks trade plan status as `"planned"`, and records `"Stage 4 · Risk & Plan Preview"` in `chat_trace`.
+    - Added `trade_plans: tuple[dict[str, Any], ...]` and `candle_series: Mapping[str, tuple[dict[str, Any], ...]]` to `DeskCycleResult`.
+    - Built comprehensive `trade_plans` across all watchlist symbols capturing `symbol`, `exchange`, `currency`, `action`, `status`, `current_price`, `buy_price`, `sell_target`, `stop_loss`, `quantity`, `reward_to_risk`, `confidence`, `rationale`, `risk_reasons`, and `executed_order_id`.
+    - Captured exact input OHLCV bars in `candle_series` for every analyzed ticker.
+  - **Backward-Compatible SQLite Persistence & Migration (`memory.py`)**:
+    - Added `auto_buy`, `trade_plans_json`, and `candle_series_json` to `cycle_runs` table in `DecisionLog._init_sqlite`.
+    - Added dynamic non-destructive `ALTER TABLE cycle_runs ADD COLUMN ...` migration for existing database files.
+    - Updated `save_cycle_run`, `list_cycle_runs`, and `get_cycle_run` to persist and retrieve `auto_buy`, `trade_plans`, and `candle_series`.
+  - **API Schemas & REST Endpoints (`schemas.py`, `state.py`, `routes.py`)**:
+    - Added `CandleBarItem` and `TradePlanItem` schemas with `extra="forbid"`.
+    - Added `auto_buy: bool = True` to `DeskRunRequest` and passed through to `orchestrator.run_cycle(auto_execute=request.auto_buy)`.
+    - Extended `DeskRunResponse` and `CycleDetailResponse` with `auto_buy`, `trade_plans`, and `candle_series`.
+    - Extended `CycleSummaryItem` with `auto_buy: bool = True`.
+    - Populated `candles: list[CandleBarItem]` in `FeedCandlesResponse` (`GET /api/feed/{exchange}/{symbol}`).
+  - **Dashboard Redesign (`dashboard.py`)**:
+    - Auto-Buy Toggle Switch beside Run Desk button (`#autoBuyToggle`) with dynamic label ("Auto-Buy ON" vs "Auto-Buy OFF").
+    - AI Trade Plans table (`#tradePlansContainer`) showing Symbol, Status badge (`EXECUTED`, `READY TO BUY`, `RISK BLOCKED`, `NO TRADE`, `DROPPED`), Current Price, Buy Price (sky-blue), Sell Target (green with upside %), Stop Loss (red with risk %), Qty & R:R, Rationale, and interactive **`Execute Paper Buy`** button for planned items calling `POST /api/orders`.
+    - Candlestick Chart (`#candlestickCanvas`, `#chartTickerPills`, `#chartReadoutBar`) rendering OHLC green/red candles and wicks, horizontal dashed AI levels (`BUY`, `SELL TARGET`, `STOP LOSS`), soft shaded reward/risk zones, and interactive mousemove crosshair with instant OHLCV readout.
+    - Zero external CDN links and strict DOM manipulation via `document.createElement` and `textContent`.
+  - **Testing & Verification**:
+    - Added `test_auto_buy_toggle_and_planned_orders`, `test_feed_candles_and_candle_series_response`, and `test_dashboard_contains_auto_buy_plans_and_chart` in `test_m6_api_and_dashboard.py`.
+    - Extended `test_e2e_platform_audit.py` with `auto_buy`, `trade_plans`, and `candle_series` assertions.
+    - Zero inline `#` comments verified across all new and modified files.
+
 ## 2026-11-24 — Abstracted Dashboard UI with Active Cycle Inspector & Agent Chat Trace (ADR-037)
 - Implemented ADR-037 providing active cycle inspection and multi-agent chat trace review:
   - **Cycle Context & Chat Trace Capture (`orchestrator.py`)**:

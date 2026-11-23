@@ -670,6 +670,7 @@ def test_cycles_endpoints_and_chat_trace(tmp_path: Path) -> None:
         assert isinstance(summary["approved_count"], int)
         assert isinstance(summary["rejected_count"], int)
         assert summary["reconciled"] is True
+        assert summary["auto_buy"] is True
 
         detail_res = client.get("/api/cycles/test-cycle-001")
         assert detail_res.status_code == 200
@@ -680,6 +681,9 @@ def test_cycles_endpoints_and_chat_trace(tmp_path: Path) -> None:
         assert detail["feed_source"] == "synthetic"
         assert detail["llm_backend"] == "stub"
         assert detail["paper_only"] is True
+        assert detail["auto_buy"] is True
+        assert len(detail["trade_plans"]) >= 2
+        assert "RELIANCE" in detail["candle_series"]
         assert len(detail["chat_trace"]) == len(desk_data["chat_trace"])
         assert detail["reconciled"] is True
         assert "DAILY DESK SUMMARY" in detail["report_markdown"]
@@ -722,6 +726,134 @@ def test_dashboard_contains_cycle_inspector_and_chat_trace(tmp_path: Path) -> No
         assert len(external_scripts) == 0
         external_css = re.findall(r'<link[^>]+href=["\']https?://', html)
         assert len(external_css) == 0
+
+
+def test_auto_buy_toggle_and_planned_orders(tmp_path: Path) -> None:
+    state = TradingLabState(
+        stop_file=tmp_path / "STOP",
+        db_path=tmp_path / "decisions.db",
+        initial_inr_deposit=Decimal("1000000"),
+    )
+    app = create_app(state=state)
+    with TestClient(app) as client:
+        res_off = client.post(
+            "/api/desk/run",
+            json={
+                "watchlist": ["RELIANCE", "TCS"],
+                "exchange": "NSE",
+                "currency": "INR",
+                "run_id": "cycle-auto-off-001",
+                "llm_backend": "stub",
+                "auto_buy": False,
+            },
+        )
+        assert res_off.status_code == 200
+        data_off = res_off.json()
+        assert data_off["auto_buy"] is False
+        assert len(data_off["approved_orders"]) == 0
+        assert len(data_off["trade_plans"]) >= 2
+        planned_plans = [p for p in data_off["trade_plans"] if p["status"] == "planned"]
+        assert len(planned_plans) >= 1
+        p0 = planned_plans[0]
+        assert p0["symbol"] == "RELIANCE"
+        assert p0["buy_price"] is not None
+        assert p0["sell_target"] is not None
+        assert p0["stop_loss"] is not None
+        assert p0["quantity"] > 0
+        assert p0["reward_to_risk"] is not None
+        assert Decimal(str(p0["reward_to_risk"])) >= Decimal("1.5")
+        assert any("Stage 4 · Risk & Plan Preview" in e["stage"] for e in data_off["chat_trace"])
+
+        p_check = client.get("/api/portfolios/INR").json()
+        assert Decimal(str(p_check["cash"])) == Decimal("1000000")
+        assert len(p_check["positions"]) == 0
+
+        detail_res = client.get("/api/cycles/cycle-auto-off-001")
+        assert detail_res.status_code == 200
+        detail_data = detail_res.json()
+        assert detail_data["auto_buy"] is False
+        assert len(detail_data["trade_plans"]) == len(data_off["trade_plans"])
+        assert "RELIANCE" in detail_data["candle_series"]
+        assert len(detail_data["candle_series"]["RELIANCE"]) > 0
+
+        manual_buy = client.post(
+            "/api/orders",
+            json={
+                "run_id": "cycle-auto-off-001",
+                "exchange": p0["exchange"],
+                "symbol": p0["symbol"],
+                "side": "BUY",
+                "quantity": p0["quantity"],
+                "quote_price": p0["current_price"],
+                "stop_loss": p0["stop_loss"],
+                "take_profit": p0["sell_target"],
+            },
+        )
+        assert manual_buy.status_code == 200
+        assert manual_buy.json()["status"] == "FILLED"
+        p_after_manual = client.get("/api/portfolios/INR").json()
+        assert Decimal(str(p_after_manual["cash"])) < Decimal("1000000")
+
+        res_on = client.post(
+            "/api/desk/run",
+            json={
+                "watchlist": ["TCS"],
+                "exchange": "NSE",
+                "currency": "INR",
+                "run_id": "cycle-auto-on-002",
+                "llm_backend": "stub",
+                "auto_buy": True,
+            },
+        )
+        assert res_on.status_code == 200
+        data_on = res_on.json()
+        assert data_on["auto_buy"] is True
+        assert len(data_on["approved_orders"]) >= 1
+        assert any("Stage 4 · Risk & Execution" in e["stage"] for e in data_on["chat_trace"])
+        exec_plans = [p for p in data_on["trade_plans"] if p["status"] == "executed"]
+        assert len(exec_plans) >= 1
+        assert exec_plans[0]["executed_order_id"] is not None
+
+
+def test_feed_candles_and_candle_series_response(tmp_path: Path) -> None:
+    state = TradingLabState(
+        stop_file=tmp_path / "STOP",
+        db_path=tmp_path / "decisions.db",
+    )
+    app = create_app(state=state)
+    with TestClient(app) as client:
+        feed_res = client.get("/api/feed/NSE/RELIANCE?bars=15")
+        assert feed_res.status_code == 200
+        feed_data = feed_res.json()
+        assert feed_data["symbol"] == "RELIANCE"
+        assert feed_data["candle_count"] == 15
+        assert len(feed_data["candles"]) == 15
+        c0 = feed_data["candles"][0]
+        assert "open" in c0
+        assert "high" in c0
+        assert "low" in c0
+        assert "close" in c0
+        assert "volume" in c0
+        assert "timestamp" in c0
+
+
+def test_dashboard_contains_auto_buy_plans_and_chart(tmp_path: Path) -> None:
+    state = TradingLabState(
+        stop_file=tmp_path / "STOP",
+        db_path=tmp_path / "decisions.db",
+    )
+    app = create_app(state=state)
+    with TestClient(app) as client:
+        resp = client.get("/")
+        assert resp.status_code == 200
+        html = resp.text
+        assert 'id="autoBuyToggle"' in html
+        assert 'id="autoBuyLabel"' in html
+        assert 'id="tradePlansContainer"' in html
+        assert 'id="candlestickCanvas"' in html
+        assert 'id="chartTickerPills"' in html
+        assert 'id="chartReadoutBar"' in html
+        assert 'id="cycleAutoBuyPill"' in html
 
 
 def test_no_inline_comments_in_m6_code() -> None:

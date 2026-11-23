@@ -251,6 +251,7 @@ class DeskRunRequest(BaseModel):
     llm_backend: Literal["stub", "ollama"] = "stub"
     ollama_model: str = Field(default="gemma4:12b", min_length=1, max_length=64)
     feed_source: Literal["synthetic", "cache", "delayed_feed"] = "synthetic"
+    auto_buy: bool = True
 
     @field_validator("watchlist")
     @classmethod
@@ -296,6 +297,37 @@ class DeskRunRequest(BaseModel):
         return clean
 
 
+class CandleBarItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    timestamp: str = Field(..., max_length=64)
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
+    volume: int = Field(default=0, ge=0)
+
+
+class TradePlanItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str = Field(..., max_length=64)
+    exchange: str = Field(..., max_length=64)
+    currency: str = Field(..., max_length=64)
+    action: str = Field(..., max_length=32)
+    status: str = Field(..., max_length=32)
+    current_price: Decimal
+    buy_price: Decimal | None = None
+    sell_target: Decimal | None = None
+    stop_loss: Decimal | None = None
+    quantity: int = Field(default=0, ge=0)
+    reward_to_risk: Decimal | None = None
+    confidence: Decimal = Decimal("0")
+    rationale: str = Field(default="", max_length=1024)
+    risk_reasons: list[str] = []
+    executed_order_id: str | None = Field(default=None, max_length=64)
+
+
 class AgentChatEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -326,6 +358,9 @@ class DeskRunResponse(BaseModel):
     watchlist: list[str] = []
     ollama_model: str = Field(default="gemma4:12b", max_length=64)
     chat_trace: list[AgentChatEntry] = []
+    auto_buy: bool = True
+    trade_plans: list[TradePlanItem] = []
+    candle_series: dict[str, list[CandleBarItem]] = {}
     paper_only: Literal[True] = True
 
 
@@ -342,6 +377,7 @@ class CycleSummaryItem(BaseModel):
     approved_count: int
     rejected_count: int
     reconciled: bool
+    auto_buy: bool = True
     paper_only: Literal[True] = True
 
 
@@ -362,6 +398,9 @@ class CycleDetailResponse(BaseModel):
     chat_trace: list[AgentChatEntry]
     report_markdown: str
     reconciled: bool
+    auto_buy: bool = True
+    trade_plans: list[TradePlanItem] = []
+    candle_series: dict[str, list[CandleBarItem]] = {}
     paper_only: Literal[True] = True
 
 
@@ -392,3 +431,4 @@ class FeedCandlesResponse(BaseModel):
     latest_close: Decimal
     latest_timestamp: datetime
     warnings: list[str] = []
+    candles: list[CandleBarItem] = []

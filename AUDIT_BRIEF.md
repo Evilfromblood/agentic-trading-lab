@@ -1,6 +1,6 @@
 # End-to-End Platform Audit & Release Candidate Verification (Milestones 1–7)
 
-**Status:** M1 through M7 complete, verified, hardened, and RC2-remediated (ADR-001 through ADR-037).
+**Status:** M1 through M7 complete, verified, hardened, and RC2-remediated (ADR-001 through ADR-038).
 **Baseline Commit:** `1b7e5829474239495163da1d2d3349eb35ca9744`  
 **Active Branch:** `feature/reliable-foundation`  
 **Audit Bundle:** `full-project-rc2-bundle.zip`

@@ -1,6 +1,6 @@
 # Next Actions
 
-Current priority: ADR-037 (Abstracted Dashboard UI with Active Cycle Inspector & Agent Chat Trace) is complete and verified. All milestones (M2a through M7, RC1, RC2, and ADR-037) are implemented, tested, and verified across Python 3.11 and Python 3.14.
+Current priority: ADR-038 (Auto-Buy Toggle, AI Buy/Sell Price Plan Cards & Candlestick Chart with AI Overlays) is complete and verified. All milestones (M2a through M7, RC1, RC2, ADR-037, and ADR-038) are implemented, tested, and verified across Python 3.11 and Python 3.14.
 
 ## Immediate sequence
 1. Baseline M2a committed (`1b7e582`) and pushed to `origin/feature/reliable-foundation`.

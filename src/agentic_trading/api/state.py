@@ -26,6 +26,7 @@ from agentic_trading.api.schemas import (
     AgentChatEntry,
     BacktestRequest,
     BacktestResponse,
+    CandleBarItem,
     CycleDetailResponse,
     CycleSummaryItem,
     DecisionRecordItem,
@@ -36,6 +37,7 @@ from agentic_trading.api.schemas import (
     PortfolioSummaryResponse,
     PositionSummary,
     SubmitOrderRequest,
+    TradePlanItem,
 )
 from agentic_trading.market_data.feed_bridge import ReadOnlyMarketFeedBridge
 from agentic_trading.market_data.instruments import (
@@ -641,6 +643,7 @@ class TradingLabState:
             run_id=run_id,
             as_of=as_of,
             watchlist=watchlist_targets,
+            auto_execute=request.auto_buy,
         )
 
         approved_orders = [
@@ -682,6 +685,12 @@ class TradingLabState:
             for entry in result.chat_trace
         ]
 
+        trade_plans = [TradePlanItem(**tp) for tp in result.trade_plans]
+        candle_series = {
+            sym: [CandleBarItem(**b) for b in bars]
+            for sym, bars in result.candle_series.items()
+        }
+
         cycle_record = {
             "run_id": run_id,
             "timestamp": as_of.isoformat(),
@@ -690,11 +699,17 @@ class TradingLabState:
             "feed_source": request.feed_source,
             "llm_backend": request.llm_backend,
             "ollama_model": request.ollama_model,
+            "auto_buy": request.auto_buy,
             "shortlist": list(result.shortlist),
             "dropped": dict(result.dropped_candidates),
             "approved_orders": approved_orders,
             "rejected_proposals": rejected_proposals,
             "chat_trace": [entry.model_dump() for entry in chat_trace],
+            "trade_plans": [p.model_dump(mode="json") for p in trade_plans],
+            "candle_series": {
+                sym: [b.model_dump(mode="json") for b in bars]
+                for sym, bars in candle_series.items()
+            },
             "report_markdown": result.report,
             "reconciled": result.reconciliation.is_reconciled,
         }
@@ -716,6 +731,9 @@ class TradingLabState:
             watchlist=request.watchlist,
             ollama_model=request.ollama_model,
             chat_trace=chat_trace,
+            auto_buy=request.auto_buy,
+            trade_plans=trade_plans,
+            candle_series=candle_series,
         )
 
     def list_cycles(self, limit: int = 20) -> list[CycleSummaryItem]:
@@ -735,6 +753,7 @@ class TradingLabState:
                         approved_count=r["approved_count"],
                         rejected_count=r["rejected_count"],
                         reconciled=r["reconciled"],
+                        auto_buy=r.get("auto_buy", True),
                     )
                 )
             return items
@@ -757,6 +776,13 @@ class TradingLabState:
                 )
                 for c in data.get("chat_trace", [])
             ]
+            trade_plans = [
+                TradePlanItem(**tp) for tp in data.get("trade_plans", [])
+            ]
+            candle_series = {
+                sym: [CandleBarItem(**b) for b in bars]
+                for sym, bars in data.get("candle_series", {}).items()
+            }
             return CycleDetailResponse(
                 run_id=data["run_id"],
                 timestamp=datetime.fromisoformat(data["timestamp"]),
@@ -772,6 +798,9 @@ class TradingLabState:
                 chat_trace=chat_entries,
                 report_markdown=data["report_markdown"],
                 reconciled=data["reconciled"],
+                auto_buy=data.get("auto_buy", True),
+                trade_plans=trade_plans,
+                candle_series=candle_series,
             )
 
     def get_feed_candles(
@@ -793,6 +822,17 @@ class TradingLabState:
                 mode=source,
             )
             latest = res.candles[-1]
+            candles = [
+                CandleBarItem(
+                    timestamp=b.timestamp.isoformat(),
+                    open=b.open,
+                    high=b.high,
+                    low=b.low,
+                    close=b.close,
+                    volume=b.volume,
+                )
+                for b in res.candles
+            ]
             return FeedCandlesResponse(
                 paper_only=True,
                 exchange=ex.value,
@@ -804,6 +844,7 @@ class TradingLabState:
                 latest_close=latest.close,
                 latest_timestamp=latest.timestamp,
                 warnings=list(res.warnings),
+                candles=candles,
             )
 
     def get_decisions(self, run_id: str | None = None) -> list[DecisionRecordItem]:

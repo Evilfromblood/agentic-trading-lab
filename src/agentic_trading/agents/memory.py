@@ -91,10 +91,22 @@ class DecisionLog:
                         rejected_proposals_json TEXT NOT NULL,
                         chat_trace_json TEXT NOT NULL,
                         report_markdown TEXT NOT NULL,
-                        reconciled INTEGER NOT NULL
+                        reconciled INTEGER NOT NULL,
+                        auto_buy INTEGER DEFAULT 1,
+                        trade_plans_json TEXT DEFAULT '[]',
+                        candle_series_json TEXT DEFAULT '{}'
                     )
                     """
                 )
+                for col, col_def in [
+                    ("auto_buy", "INTEGER DEFAULT 1"),
+                    ("trade_plans_json", "TEXT DEFAULT '[]'"),
+                    ("candle_series_json", "TEXT DEFAULT '{}'"),
+                ]:
+                    try:
+                        conn.execute(f"ALTER TABLE cycle_runs ADD COLUMN {col} {col_def}")
+                    except sqlite3.OperationalError:
+                        pass
         finally:
             conn.close()
 
@@ -183,14 +195,15 @@ class DecisionLog:
                 else data["timestamp"].isoformat()
             )
             reconciled_val = 1 if data.get("reconciled", True) else 0
+            auto_buy_val = 1 if data.get("auto_buy", True) else 0
             conn = sqlite3.connect(self._db_path)
             try:
                 with conn:
                     conn.execute(
                         """
                         INSERT OR REPLACE INTO cycle_runs
-                        (run_id, timestamp, currency, watchlist_json, feed_source, llm_backend, ollama_model, shortlist_json, dropped_json, approved_orders_json, rejected_proposals_json, chat_trace_json, report_markdown, reconciled)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (run_id, timestamp, currency, watchlist_json, feed_source, llm_backend, ollama_model, shortlist_json, dropped_json, approved_orders_json, rejected_proposals_json, chat_trace_json, report_markdown, reconciled, auto_buy, trade_plans_json, candle_series_json)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             data["run_id"],
@@ -207,6 +220,9 @@ class DecisionLog:
                             json.dumps(data["chat_trace"], sort_keys=True),
                             data["report_markdown"],
                             reconciled_val,
+                            auto_buy_val,
+                            json.dumps(data.get("trade_plans", []), sort_keys=True),
+                            json.dumps(data.get("candle_series", {}), sort_keys=True),
                         ),
                     )
             finally:
@@ -219,7 +235,7 @@ class DecisionLog:
                 with conn:
                     cursor = conn.execute(
                         """
-                        SELECT run_id, timestamp, currency, watchlist_json, feed_source, llm_backend, ollama_model, approved_orders_json, rejected_proposals_json, reconciled
+                        SELECT run_id, timestamp, currency, watchlist_json, feed_source, llm_backend, ollama_model, approved_orders_json, rejected_proposals_json, reconciled, auto_buy
                         FROM cycle_runs ORDER BY id DESC LIMIT ?
                         """,
                         (limit,),
@@ -237,6 +253,7 @@ class DecisionLog:
                             ord_json,
                             rej_json,
                             rec,
+                            auto_buy_val,
                         ) = row
                         approved_orders = json.loads(ord_json)
                         rejected_proposals = json.loads(rej_json)
@@ -252,6 +269,7 @@ class DecisionLog:
                                 "approved_count": len(approved_orders),
                                 "rejected_count": len(rejected_proposals),
                                 "reconciled": bool(rec),
+                                "auto_buy": bool(auto_buy_val) if auto_buy_val is not None else True,
                             }
                         )
                     return tuple(summaries)
@@ -277,6 +295,7 @@ class DecisionLog:
                     "approved_count": len(c["approved_orders"]),
                     "rejected_count": len(c["rejected_proposals"]),
                     "reconciled": bool(c.get("reconciled", True)),
+                    "auto_buy": bool(c.get("auto_buy", True)),
                 }
             )
         return tuple(summaries_mem)
@@ -288,7 +307,7 @@ class DecisionLog:
                 with conn:
                     cursor = conn.execute(
                         """
-                        SELECT run_id, timestamp, currency, watchlist_json, feed_source, llm_backend, ollama_model, shortlist_json, dropped_json, approved_orders_json, rejected_proposals_json, chat_trace_json, report_markdown, reconciled
+                        SELECT run_id, timestamp, currency, watchlist_json, feed_source, llm_backend, ollama_model, shortlist_json, dropped_json, approved_orders_json, rejected_proposals_json, chat_trace_json, report_markdown, reconciled, auto_buy, trade_plans_json, candle_series_json
                         FROM cycle_runs WHERE run_id = ?
                         """,
                         (run_id,),
@@ -311,6 +330,9 @@ class DecisionLog:
                         "chat_trace": json.loads(row[11]),
                         "report_markdown": row[12],
                         "reconciled": bool(row[13]),
+                        "auto_buy": bool(row[14]) if len(row) > 14 and row[14] is not None else True,
+                        "trade_plans": json.loads(row[15]) if len(row) > 15 and row[15] else [],
+                        "candle_series": json.loads(row[16]) if len(row) > 16 and row[16] else {},
                     }
             finally:
                 conn.close()
@@ -320,6 +342,9 @@ class DecisionLog:
                 item = dict(c)
                 if not isinstance(item["timestamp"], str):
                     item["timestamp"] = item["timestamp"].isoformat()
+                item.setdefault("auto_buy", True)
+                item.setdefault("trade_plans", [])
+                item.setdefault("candle_series", {})
                 return item
         return None
 

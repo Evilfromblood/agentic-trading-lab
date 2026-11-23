@@ -117,6 +117,9 @@ def test_end_to_end_platform_lifecycle_audit(tmp_path: Path) -> None:
         assert desk_data["reconciled"] is True
         assert "DAILY DESK SUMMARY" in desk_data["report_markdown"]
         assert len(desk_data["shortlist"]) > 0
+        assert desk_data["auto_buy"] is True
+        assert len(desk_data["trade_plans"]) >= 2
+        assert "RELIANCE" in desk_data["candle_series"]
 
         dec_res = client.get(f"/api/decisions?run_id={run_id}")
         assert dec_res.status_code == 200
@@ -130,6 +133,7 @@ def test_end_to_end_platform_lifecycle_audit(tmp_path: Path) -> None:
         assert len(cycles_data) >= 1
         assert cycles_data[0]["run_id"] == run_id
         assert cycles_data[0]["paper_only"] is True
+        assert cycles_data[0]["auto_buy"] is True
 
         cycle_detail_res = client.get(f"/api/cycles/{run_id}")
         assert cycle_detail_res.status_code == 200
@@ -137,6 +141,9 @@ def test_end_to_end_platform_lifecycle_audit(tmp_path: Path) -> None:
         assert cycle_detail["run_id"] == run_id
         assert len(cycle_detail["chat_trace"]) >= 4
         assert cycle_detail["paper_only"] is True
+        assert cycle_detail["auto_buy"] is True
+        assert len(cycle_detail["trade_plans"]) >= 2
+        assert "RELIANCE" in cycle_detail["candle_series"]
 
         ks_on = client.post(
             "/api/kill-switch",
