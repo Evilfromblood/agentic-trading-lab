@@ -104,15 +104,21 @@ def cancel_order(
             status_code=400,
             detail=f"Unsupported currency '{currency}'",
         )
+    clean_cid = client_order_id.strip()
+    if not clean_cid or len(clean_cid) > 64:
+        raise HTTPException(
+            status_code=400,
+            detail="client_order_id must be non-empty and at most 64 characters",
+        )
     if state.kill_switch.is_active():
         reason = state.kill_switch.reason() or "Emergency kill switch is active"
         raise HTTPException(status_code=409, detail=f"Cancel rejected: {reason}")
     try:
-        return state.cancel_order(curr, client_order_id)
+        return state.cancel_order(curr, clean_cid)
     except KeyError as exc:
         raise HTTPException(
             status_code=404,
-            detail=f"Order '{client_order_id}' not found",
+            detail=f"Order '{clean_cid}' not found",
         ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -148,6 +154,6 @@ def run_desk(
 @router.get("/decisions", response_model=list[DecisionRecordItem])
 def get_decisions(
     state: Annotated[TradingLabState, Depends(get_lab_state)],
-    run_id: str | None = Query(default=None),
+    run_id: str | None = Query(default=None, max_length=64),
 ) -> list[DecisionRecordItem]:
     return state.get_decisions(run_id=run_id)

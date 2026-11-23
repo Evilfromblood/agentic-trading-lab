@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def _check_finite_positive(v: Any) -> Decimal:
@@ -46,32 +46,42 @@ def _check_positive_int(v: Any) -> int:
 class HealthResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    status: str = "ok"
+    status: str = Field(default="ok", max_length=64)
     paper_only: Literal[True] = True
     kill_switch_active: bool
-    kill_switch_reason: str | None = None
+    kill_switch_reason: str | None = Field(default=None, max_length=512)
 
 
 class KillSwitchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     active: bool
-    reason: str = "MANUAL_UI_STOP"
+    reason: str = Field(default="MANUAL_UI_STOP", max_length=64)
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, v: str) -> str:
+        clean = v.strip() if isinstance(v, str) else ""
+        if not clean:
+            raise ValueError("reason must be a non-empty string")
+        if len(clean) > 64:
+            raise ValueError("reason must not exceed 64 characters")
+        return clean
 
 
 class KillSwitchResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     active: bool
-    reason: str | None = None
+    reason: str | None = Field(default=None, max_length=512)
     paper_only: Literal[True] = True
 
 
 class PositionSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    symbol: str
-    exchange: str
+    symbol: str = Field(..., max_length=64)
+    exchange: str = Field(..., max_length=64)
     quantity: int
     average_cost: Decimal
     market_price: Decimal
@@ -100,16 +110,16 @@ class PortfolioSummaryResponse(BaseModel):
 class SubmitOrderRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    run_id: str
+    run_id: str = Field(..., max_length=64)
     exchange: Literal["NSE", "BSE", "NYSE", "NASDAQ"]
-    symbol: str
+    symbol: str = Field(..., max_length=64)
     side: Literal["BUY", "SELL"]
-    quantity: int
+    quantity: int = Field(..., gt=0)
     quote_price: Decimal
     limit_price: Decimal | None = None
     stop_loss: Decimal | None = None
     take_profit: Decimal | None = None
-    client_order_id: str | None = None
+    client_order_id: str | None = Field(default=None, max_length=64)
 
     @field_validator("run_id", "symbol")
     @classmethod
@@ -117,6 +127,20 @@ class SubmitOrderRequest(BaseModel):
         clean = v.strip().upper() if isinstance(v, str) else ""
         if not clean:
             raise ValueError("must be a non-empty string")
+        if len(clean) > 64:
+            raise ValueError("must not exceed 64 characters")
+        return clean
+
+    @field_validator("client_order_id")
+    @classmethod
+    def validate_client_order_id(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        clean = v.strip() if isinstance(v, str) else ""
+        if not clean:
+            raise ValueError("client_order_id cannot be blank")
+        if len(clean) > 64:
+            raise ValueError("client_order_id must not exceed 64 characters")
         return clean
 
     @field_validator("quantity", mode="before")
@@ -138,21 +162,21 @@ class SubmitOrderRequest(BaseModel):
 class OrderResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    client_order_id: str
-    run_id: str
-    exchange: str
-    symbol: str
-    side: str
+    client_order_id: str = Field(..., max_length=64)
+    run_id: str = Field(..., max_length=64)
+    exchange: str = Field(..., max_length=64)
+    symbol: str = Field(..., max_length=64)
+    side: str = Field(..., max_length=64)
     quantity: int
     filled_quantity: int
-    status: str
+    status: str = Field(..., max_length=64)
     limit_price: Decimal | None = None
     stop_loss: Decimal | None = None
     take_profit: Decimal | None = None
     average_fill_price: Decimal | None = None
     fees: Decimal
     slippage: Decimal
-    reject_reason: str | None = None
+    reject_reason: str | None = Field(default=None, max_length=256)
     submitted_at: datetime
     filled_at: datetime | None = None
     paper_only: Literal[True] = True
@@ -161,13 +185,13 @@ class OrderResponse(BaseModel):
 class BacktestRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    symbol: str = "RELIANCE"
+    symbol: str = Field(default="RELIANCE", max_length=64)
     exchange: Literal["NSE", "BSE", "NYSE", "NASDAQ"] = "NSE"
     initial_capital: Decimal = Decimal("1000000")
     currency: Literal["INR", "USD"] = "INR"
-    bars_count: int = 100
-    random_seed: int = 42
-    monte_carlo_runs: int = 500
+    bars_count: int = Field(default=100, ge=10, le=500)
+    random_seed: int = Field(default=42, ge=0)
+    monte_carlo_runs: int = Field(default=500, ge=1, le=5000)
 
     @field_validator("symbol")
     @classmethod
@@ -175,6 +199,8 @@ class BacktestRequest(BaseModel):
         clean = v.strip().upper() if isinstance(v, str) else ""
         if not clean:
             raise ValueError("symbol must be a non-empty string")
+        if len(clean) > 64:
+            raise ValueError("symbol must not exceed 64 characters")
         return clean
 
     @field_validator("initial_capital", mode="before")
@@ -186,24 +212,24 @@ class BacktestRequest(BaseModel):
     @classmethod
     def validate_bars_count(cls, v: Any) -> int:
         count = _check_positive_int(v)
-        if count < 10:
-            raise ValueError("bars_count must be at least 10")
+        if count < 10 or count > 500:
+            raise ValueError("bars_count must be between 10 and 500")
         return count
 
     @field_validator("monte_carlo_runs", mode="before")
     @classmethod
     def validate_monte_carlo_runs(cls, v: Any) -> int:
         runs = _check_positive_int(v)
-        if runs < 1:
-            raise ValueError("monte_carlo_runs must be at least 1")
+        if runs < 1 or runs > 5000:
+            raise ValueError("monte_carlo_runs must be between 1 and 5000")
         return runs
 
 
 class BacktestResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    manifest_id: str
-    manifest_sha256: str
+    manifest_id: str = Field(..., max_length=64)
+    manifest_sha256: str = Field(..., max_length=64)
     manifest_verified: bool
     metrics: dict[str, Any]
     monte_carlo: dict[str, Any]
@@ -215,27 +241,50 @@ class BacktestResponse(BaseModel):
 class DeskRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    watchlist: list[str] = ["RELIANCE", "TCS"]
+    watchlist: list[str] = Field(default=["RELIANCE", "TCS"], min_length=1, max_length=20)
     exchange: Literal["NSE", "BSE", "NYSE", "NASDAQ"] = "NSE"
     currency: Literal["INR", "USD"] = "INR"
-    run_id: str | None = None
+    run_id: str | None = Field(default=None, max_length=64)
 
     @field_validator("watchlist")
     @classmethod
     def validate_watchlist(cls, v: list[str]) -> list[str]:
         if not v:
             raise ValueError("watchlist must not be empty")
-        cleaned = [item.strip().upper() for item in v if isinstance(item, str) and item.strip()]
+        if len(v) > 20:
+            raise ValueError("watchlist must not exceed 20 symbols")
+        cleaned: list[str] = []
+        for item in v:
+            if not isinstance(item, str) or not item.strip():
+                continue
+            item_clean = item.strip().upper()
+            if len(item_clean) > 64:
+                raise ValueError("symbol must not exceed 64 characters")
+            cleaned.append(item_clean)
         if not cleaned:
             raise ValueError("watchlist must contain at least one valid ticker")
+        if len(cleaned) > 20:
+            raise ValueError("watchlist must not exceed 20 symbols")
         return cleaned
+
+    @field_validator("run_id")
+    @classmethod
+    def validate_run_id(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        clean = v.strip() if isinstance(v, str) else ""
+        if not clean:
+            raise ValueError("run_id cannot be blank")
+        if len(clean) > 64:
+            raise ValueError("run_id must not exceed 64 characters")
+        return clean
 
 
 class DeskRunResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    run_id: str
-    currency: str
+    run_id: str = Field(..., max_length=64)
+    currency: str = Field(..., max_length=64)
     shortlist: list[str]
     dropped: dict[str, str]
     approved_orders: list[dict[str, Any]]
@@ -248,10 +297,10 @@ class DeskRunResponse(BaseModel):
 class DecisionRecordItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    run_id: str
+    run_id: str = Field(..., max_length=64)
     timestamp: datetime
-    ticker: str
-    inputs_hash: str
+    ticker: str = Field(..., max_length=64)
+    inputs_hash: str = Field(..., max_length=128)
     shortlist_rank: int | None = None
     analyst_envelopes: dict[str, Any] = {}
     strategist_proposal: dict[str, Any] | None = None

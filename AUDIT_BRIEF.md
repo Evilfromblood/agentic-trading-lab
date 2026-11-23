@@ -1,17 +1,17 @@
 # Milestone 6 Verified & Multi-Milestone Full Verification Audit Brief
 
-**Status:** M2a, M2b, M2c, M3, M4, M5, and M6 verified and hardened (ADR-028, ADR-029, ADR-030).
+**Status:** M2a, M2b, M2c, M3, M4, M5, and M6 verified and hardened (ADR-028, ADR-029, ADR-030, ADR-031).
 **Baseline Commit:** `1b7e5829474239495163da1d2d3349eb35ca9744`  
 **Active Branch:** `feature/reliable-foundation`  
-**Audit Bundle:** `full-project-m6-review-bundle.zip`
+**Audit Bundle:** `full-project-m6-final-bundle.zip`
 
 ---
 
 ## 1. Executive Summary
 
-Milestone 6 (Local-First FastAPI Backend & Interactive Web Dashboard) has been implemented and verified alongside all prior milestones (M2a, M2b, M2c, M3, M4, M5).
+Milestone 6 (Local-First FastAPI Backend & Interactive Web Dashboard) has been implemented, hardened against adversarial attacks (DNS-rebinding, cross-origin CSRF, unbounded payloads, race conditions), and verified alongside all prior milestones (M2a, M2b, M2c, M3, M4, M5).
 
-All 467 tests pass across the entire test suite on both genuine Python 3.11.9 (`.venv311`) and Python 3.14.4 (`.venv`). Measured test coverage is **88.12%** (strictly enforcing `--cov-fail-under=85`). Ruff linting, compileall byte-compilation on both Python versions, and blocking secret scanning (`detect-secrets-hook --baseline .secrets.baseline` version 1.5.0 scanning `requirements.lock`) pass with zero errors and zero unbaselined secrets. All new and existing API source files and tests enforce zero inline `#` comments via automated tokenizer tests.
+All 472 tests pass across the entire test suite on both genuine Python 3.11.9 (`.venv311`) and Python 3.14.4 (`.venv`). Measured test coverage is **88.17%** (strictly enforcing `--cov-fail-under=85`). Ruff linting, compileall byte-compilation on both Python versions, and blocking secret scanning (`detect-secrets-hook --baseline .secrets.baseline` version 1.5.0 scanning `requirements.lock`) pass with zero errors and zero unbaselined secrets. All new and existing API source files and tests enforce zero inline `#` comments via automated tokenizer tests.
 
 ---
 

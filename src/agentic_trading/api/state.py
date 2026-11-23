@@ -204,15 +204,18 @@ class TradingLabState:
             positions_list: list[PositionSummary] = []
             for (ex, sym), pos in snapshot.positions.items():
                 if pos.quantity != 0:
+                    mark_amount = marks.get((ex, sym), pos.average_cost).amount
+                    mkt_val = mark_amount * Decimal(pos.quantity)
+                    unrealized = mkt_val - pos.cost_basis.amount
                     positions_list.append(
                         PositionSummary(
                             symbol=sym,
                             exchange=ex.value,
                             quantity=pos.quantity,
                             average_cost=pos.average_cost.amount,
-                            market_price=pos.average_cost.amount,
-                            market_value=pos.market_value.amount,
-                            unrealized_pnl=pos.unrealized_pnl.amount,
+                            market_price=mark_amount,
+                            market_value=mkt_val,
+                            unrealized_pnl=unrealized,
                         )
                     )
 

@@ -2,6 +2,34 @@
 
 Append concise entries in reverse chronological order. Record verified outcomes, not intentions.
 
+## 2026-11-23 — Milestone 6 Adversarial Hardening: DNS-Rebinding, Origin Defense, CSP Headers & Concurrency (ADR-031)
+- Hardened Milestone 6 FastAPI application and dashboard against adversarial web attacks, payload tampering, and thread races:
+  - **Host Header & DNS-Rebinding Protection (`src/agentic_trading/api/app.py`)**:
+    - Added HTTP middleware validating `Host` header (normalizing case, stripping ports, and handling IPv6 bracket notation `[::1]`).
+    - Rejects unauthorized hosts outside `ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1", "testserver"}` with HTTP 403 (`{"detail": "Forbidden host header"}`).
+  - **Cross-Origin CSRF Defense (`src/agentic_trading/api/app.py`)**:
+    - For state-mutating HTTP methods (`POST`, `PUT`, `PATCH`, `DELETE`), parses `Origin` and `Referer` headers via `urllib.parse.urlparse`.
+    - Rejects requests from untrusted external origins with HTTP 403 (`{"detail": "Cross-origin state mutation forbidden"}`).
+  - **Strict Browser Security & CSP Headers (`src/agentic_trading/api/app.py`)**:
+    - Injected defensive security headers on all HTTP responses: `Content-Security-Policy` (`default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`), `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`.
+  - **Strict Request Schema Bounds & Extra Rejection (`src/agentic_trading/api/schemas.py`, `src/agentic_trading/api/routes.py`)**:
+    - Enforced `model_config = ConfigDict(extra="forbid")` across all Pydantic schemas, rejecting unknown injected parameters with HTTP 422.
+    - Added explicit length caps (`max_length <= 64`) on request identifiers (`run_id`, `symbol`, `client_order_id`, `reason`).
+    - Enforced bounded collections and numbers: `DeskRunRequest.watchlist` capped at 20 symbols, `BacktestRequest.bars_count` bounded to `[10, 500]`, `monte_carlo_runs` bounded to `[1, 5000]`.
+    - Added validation on order cancellation route ensuring `client_order_id` in path is non-empty and `<= 64` chars.
+  - **State Concurrency & Exact Conservation (`src/agentic_trading/api/state.py`)**:
+    - All portfolio, order, desk, and backtest mutations synchronized under `self._lock` (`threading.RLock`).
+    - Fixed `Position` snapshot evaluation to access `@property cost_basis.amount`, preventing callable errors under concurrent load and preserving exact `Decimal("0")` conservation residuals.
+  - **Adversarial Regression Tests (`tests/test_m6_api_and_dashboard.py`)**:
+    - Added 5 new adversarial tests covering DNS-rebinding rejection, cross-origin state mutation rejection, CSP/security header verification, schema extra field & length bounds rejection, 16-thread concurrent execution stress test, and restart persistence continuity.
+- **Validation results**:
+  - Full pytest suite: **472 passed in 7.58s** on Python 3.11.9 (`.venv311`) and **472 passed in 3.92s** on Python 3.14.4 (`.venv`).
+  - Genuine pytest-cov coverage: **88.17%** (exceeding mandatory `--cov-fail-under=85`).
+  - Ruff `src`, `tests`, and `v3-zerodha/src`: `All checks passed!`.
+  - Python compileall: passed with exit code 0 on both 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked files.
+  - Zero inline `#` comments verified across all git diff additions.
+
 ## 2026-11-23 — Milestone 6 Implementation: Local-First FastAPI Backend & Dashboard (ADR-030)
 - Implemented and verified complete Milestone 6 architecture across API schemas, state management, REST endpoints, and local web dashboard:
   - **Pydantic v2 Schemas (`src/agentic_trading/api/schemas.py`)**:

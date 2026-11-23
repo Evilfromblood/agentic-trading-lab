@@ -424,3 +424,45 @@ Append decisions; do not silently rewrite historical decisions. Mark superseded 
   - Python compileall: passed with exit code 0 on both Python 3.11 and 3.14.
   - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files including `requirements.lock`.
   - Zero inline `#` comments verified across all git diff additions.
+
+
+## ADR-031 (Milestone 6 Adversarial Hardening: Host/Origin CSRF & DNS-Rebinding Guard, CSP Headers, Strict Pydantic Bounds & Concurrent State Integrity)
+- **Status:** Accepted (2026-11-23)
+- **Context:** Following the initial Milestone 6 implementation, an adversarial audit identified vectors in HTTP host validation, cross-origin state mutation, missing browser security/CSP headers, unbounded request payload fields, and state concurrency under multi-threaded contention.
+- **Decisions:**
+  1. **Host Header & DNS-Rebinding Defense (`src/agentic_trading/api/app.py`):**
+     - HTTP middleware extracts and normalizes the `Host` header (stripping ports and handling IPv6 bracket syntax `[::1]`).
+     - Rejects any request whose host is not in `ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1", "testserver"}` with HTTP 403 (`{"detail": "Forbidden host header"}`).
+  2. **Cross-Origin State Mutation Defense (`src/agentic_trading/api/app.py`):**
+     - For state-mutating HTTP methods (`POST`, `PUT`, `PATCH`, `DELETE`), middleware parses `Origin` and `Referer` headers via `urllib.parse.urlparse`.
+     - Rejects requests from untrusted origins or referers with HTTP 403 (`{"detail": "Cross-origin state mutation forbidden"}`), mitigating CSRF and malicious script exploitation.
+  3. **Strict Content-Security-Policy & Defensive Security Headers (`src/agentic_trading/api/app.py`):**
+     - Injected defensive security headers on every response:
+       - `Content-Security-Policy`: `default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`
+       - `X-Content-Type-Options`: `nosniff`
+       - `X-Frame-Options`: `DENY`
+       - `Referrer-Policy`: `no-referrer`
+  4. **Strict Schema Constraints & Bounds (`src/agentic_trading/api/schemas.py`, `src/agentic_trading/api/routes.py`):**
+     - `ConfigDict(extra="forbid")` enforced across all models, failing closed on unexpected extra fields with HTTP 422.
+     - String length caps (`max_length <= 64`) on request identifiers (`run_id`, `symbol`, `client_order_id`, `reason`).
+     - Bounded collection limits: `DeskRunRequest.watchlist` capped at 20 symbols (`max_length=20`); `BacktestRequest.bars_count` bounded to `[10, 500]`; `monte_carlo_runs` bounded to `[1, 5000]`.
+     - Sanitized cancel endpoint validation: `client_order_id` in path must be non-empty and `<= 64` characters.
+  5. **Concurrency & Thread Safety (`src/agentic_trading/api/state.py`):**
+     - All state access (`get_portfolio_summary`, `submit_order`, `cancel_order`, `run_backtest`, `run_desk`, `get_decisions`, `set_kill_switch`) synchronized under `self._lock` (`threading.RLock`).
+     - Fixed `Position` snapshot evaluation to access `@property cost_basis.amount`, ensuring exact `Decimal("0")` conservation residual without `Money` callable errors under concurrent order submission.
+  6. **Restart Continuity & Adversarial Regression Suite (`tests/test_m6_api_and_dashboard.py`):**
+     - Added 5 new adversarial tests (expanding suite to 15 tests):
+       - `test_dns_rebinding_and_cross_origin_state_mutation_blocked`
+       - `test_security_headers_present`
+       - `test_schema_extra_forbid_and_bounds_rejection`
+       - `test_concurrent_state_and_portfolio_conservation`
+       - `test_restart_continuity`
+     - Validated zero inline `#` comments via `tokenize`.
+- **Consequences:** Hardens local paper trading dashboard and HTTP API against DNS rebinding, cross-origin state manipulation, injection attacks, and thread races while preserving exact 0 conservation residuals and persistent audit trails.
+- **Verification Evidence:**
+  - Full pytest suite: **472 passed in 7.58s** on Python 3.11.9 (`.venv311`) and **472 passed in 3.92s** on Python 3.14.4 (`.venv`).
+  - Genuine pytest-cov coverage: **88.17%** (exceeding mandatory `--cov-fail-under=85`).
+  - Ruff `src`, `tests`, and `v3-zerodha/src`: `All checks passed!`.
+  - Python compileall: passed with exit code 0 on both Python 3.11 and 3.14.
+  - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files including `requirements.lock`.
+  - Zero inline `#` comments verified across all git diff additions.

@@ -1,6 +1,7 @@
 """Comprehensive tests for Milestone 6 FastAPI backend, routes, and local dashboard."""
 from __future__ import annotations
 
+import concurrent.futures
 import re
 import tokenize
 from decimal import Decimal
@@ -293,6 +294,312 @@ def test_desk_run_and_decision_log_retrieval(tmp_path: Path) -> None:
         dec_data = dec_res.json()
         assert len(dec_data) > 0
         assert dec_data[0]["run_id"] == "audit-desk-run-101"
+
+
+def test_dns_rebinding_and_cross_origin_state_mutation_blocked(tmp_path: Path) -> None:
+    state = TradingLabState(
+        stop_file=tmp_path / "STOP",
+        db_path=tmp_path / "decisions.db",
+    )
+    app = create_app(state=state)
+    with TestClient(app) as client:
+        forbidden_host_resp = client.get("/api/health", headers={"host": "evil.example.com"})
+        assert forbidden_host_resp.status_code == 403
+        assert "Forbidden host header" in forbidden_host_resp.json()["detail"]
+
+        forbidden_host_port_resp = client.get("/", headers={"host": "attacker.com:8080"})
+        assert forbidden_host_port_resp.status_code == 403
+
+        cors_origin_resp = client.post(
+            "/api/orders",
+            headers={"origin": "https://malicious.org"},
+            json={
+                "run_id": "run-cors",
+                "exchange": "NSE",
+                "symbol": "TCS",
+                "side": "BUY",
+                "quantity": 1,
+                "quote_price": "3000.00",
+            },
+        )
+        assert cors_origin_resp.status_code == 403
+        assert "Cross-origin state mutation forbidden" in cors_origin_resp.json()["detail"]
+
+        cors_referer_resp = client.post(
+            "/api/kill-switch",
+            headers={"referer": "https://evil-phish.net/page"},
+            json={"active": True, "reason": "UNAUTHORIZED_CORS"},
+        )
+        assert cors_referer_resp.status_code == 403
+        assert "Cross-origin state mutation forbidden" in cors_referer_resp.json()["detail"]
+
+        valid_host_resp = client.get("/api/health", headers={"host": "localhost:8000"})
+        assert valid_host_resp.status_code == 200
+
+        valid_ip_resp = client.get("/api/health", headers={"host": "127.0.0.1:8000"})
+        assert valid_ip_resp.status_code == 200
+
+        valid_ipv6_resp = client.get("/api/health", headers={"host": "[::1]:8000"})
+        assert valid_ipv6_resp.status_code == 200
+
+        valid_origin_resp = client.post(
+            "/api/orders",
+            headers={"origin": "http://localhost:8000"},
+            json={
+                "run_id": "run-valid-origin",
+                "exchange": "NSE",
+                "symbol": "TCS",
+                "side": "BUY",
+                "quantity": 1,
+                "quote_price": "3000.00",
+            },
+        )
+        assert valid_origin_resp.status_code == 200
+
+
+def test_security_headers_present(tmp_path: Path) -> None:
+    state = TradingLabState(
+        stop_file=tmp_path / "STOP",
+        db_path=tmp_path / "decisions.db",
+    )
+    app = create_app(state=state)
+    with TestClient(app) as client:
+        resp = client.get("/")
+        assert resp.status_code == 200
+        headers = resp.headers
+        expected_csp = (
+            "default-src 'none'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "connect-src 'self'; "
+            "img-src 'self' data:; "
+            "frame-ancestors 'none'; "
+            "base-uri 'none'; "
+            "form-action 'self'"
+        )
+        assert headers.get("content-security-policy") == expected_csp
+        assert headers.get("x-content-type-options") == "nosniff"
+        assert headers.get("x-frame-options") == "DENY"
+        assert headers.get("referrer-policy") == "no-referrer"
+
+        health_resp = client.get("/api/health")
+        assert health_resp.headers.get("content-security-policy") == expected_csp
+        assert health_resp.headers.get("x-content-type-options") == "nosniff"
+        assert health_resp.headers.get("x-frame-options") == "DENY"
+        assert health_resp.headers.get("referrer-policy") == "no-referrer"
+
+
+def test_schema_extra_forbid_and_bounds_rejection(tmp_path: Path) -> None:
+    state = TradingLabState(
+        stop_file=tmp_path / "STOP",
+        db_path=tmp_path / "decisions.db",
+    )
+    app = create_app(state=state)
+    with TestClient(app) as client:
+        extra_order_res = client.post(
+            "/api/orders",
+            json={
+                "run_id": "valid-run",
+                "exchange": "NSE",
+                "symbol": "TCS",
+                "side": "BUY",
+                "quantity": 1,
+                "quote_price": "3000.00",
+                "extra_malicious_key": "injected_payload",
+            },
+        )
+        assert extra_order_res.status_code == 422
+
+        extra_kill_res = client.post(
+            "/api/kill-switch",
+            json={"active": True, "reason": "STOP", "forbid_me": 1},
+        )
+        assert extra_kill_res.status_code == 422
+
+        extra_bt_res = client.post(
+            "/api/backtest",
+            json={"symbol": "TCS", "unexpected": "value"},
+        )
+        assert extra_bt_res.status_code == 422
+
+        extra_desk_res = client.post(
+            "/api/desk/run",
+            json={"watchlist": ["TCS"], "exploit": True},
+        )
+        assert extra_desk_res.status_code == 422
+
+        oversized_run_id_res = client.post(
+            "/api/orders",
+            json={
+                "run_id": "X" * 65,
+                "exchange": "NSE",
+                "symbol": "TCS",
+                "side": "BUY",
+                "quantity": 1,
+                "quote_price": "3000.00",
+            },
+        )
+        assert oversized_run_id_res.status_code == 422
+
+        oversized_symbol_res = client.post(
+            "/api/orders",
+            json={
+                "run_id": "run-1",
+                "exchange": "NSE",
+                "symbol": "S" * 65,
+                "side": "BUY",
+                "quantity": 1,
+                "quote_price": "3000.00",
+            },
+        )
+        assert oversized_symbol_res.status_code == 422
+
+        oversized_cid_res = client.post(
+            "/api/orders",
+            json={
+                "run_id": "run-1",
+                "exchange": "NSE",
+                "symbol": "TCS",
+                "side": "BUY",
+                "quantity": 1,
+                "quote_price": "3000.00",
+                "client_order_id": "C" * 65,
+            },
+        )
+        assert oversized_cid_res.status_code == 422
+
+        oversized_reason_res = client.post(
+            "/api/kill-switch",
+            json={"active": True, "reason": "R" * 65},
+        )
+        assert oversized_reason_res.status_code == 422
+
+        oversized_bars_res = client.post(
+            "/api/backtest",
+            json={"symbol": "RELIANCE", "bars_count": 501},
+        )
+        assert oversized_bars_res.status_code == 422
+
+        undersized_bars_res = client.post(
+            "/api/backtest",
+            json={"symbol": "RELIANCE", "bars_count": 5},
+        )
+        assert undersized_bars_res.status_code == 422
+
+        oversized_watchlist_res = client.post(
+            "/api/desk/run",
+            json={"watchlist": [f"SYM{i}" for i in range(21)]},
+        )
+        assert oversized_watchlist_res.status_code == 422
+
+
+def test_concurrent_state_and_portfolio_conservation(tmp_path: Path) -> None:
+    state = TradingLabState(
+        stop_file=tmp_path / "STOP",
+        db_path=tmp_path / "decisions.db",
+        initial_inr_deposit=Decimal("1000000"),
+        initial_usd_deposit=Decimal("50000"),
+    )
+    app = create_app(state=state)
+
+    def submit_inr(i: int) -> int:
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/orders",
+                json={
+                    "run_id": f"conc-inr-{i}",
+                    "exchange": "NSE",
+                    "symbol": "RELIANCE",
+                    "side": "BUY",
+                    "quantity": 2,
+                    "quote_price": "2000.00",
+                    "client_order_id": f"conc-inr-cid-{i}",
+                },
+            )
+            return resp.status_code
+
+    def submit_usd(i: int) -> int:
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/orders",
+                json={
+                    "run_id": f"conc-usd-{i}",
+                    "exchange": "NASDAQ",
+                    "symbol": "AAPL",
+                    "side": "BUY",
+                    "quantity": 1,
+                    "quote_price": "150.00",
+                    "client_order_id": f"conc-usd-cid-{i}",
+                },
+            )
+            return resp.status_code
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        inr_futures = [executor.submit(submit_inr, i) for i in range(8)]
+        usd_futures = [executor.submit(submit_usd, i) for i in range(8)]
+        inr_results = [f.result() for f in inr_futures]
+        usd_results = [f.result() for f in usd_futures]
+
+    assert all(code == 200 for code in inr_results)
+    assert all(code == 200 for code in usd_results)
+
+    with TestClient(app) as client:
+        inr_summary = client.get("/api/portfolios/INR").json()
+        assert inr_summary["is_reconciled"] is True
+        assert Decimal(str(inr_summary["conservation_residual"])) == Decimal("0")
+
+        usd_summary = client.get("/api/portfolios/USD").json()
+        assert usd_summary["is_reconciled"] is True
+        assert Decimal(str(usd_summary["conservation_residual"])) == Decimal("0")
+
+
+def test_restart_continuity(tmp_path: Path) -> None:
+    stop_file = tmp_path / "STOP"
+    db_path = tmp_path / "decisions.db"
+
+    state1 = TradingLabState(stop_file=stop_file, db_path=db_path)
+    app1 = create_app(state=state1)
+    with TestClient(app1) as client1:
+        desk_res = client1.post(
+            "/api/desk/run",
+            json={
+                "watchlist": ["RELIANCE"],
+                "exchange": "NSE",
+                "currency": "INR",
+                "run_id": "persist-desk-001",
+            },
+        )
+        assert desk_res.status_code == 200
+
+        kill_res = client1.post(
+            "/api/kill-switch",
+            json={"active": True, "reason": "PERSIST_RESTART_STOP"},
+        )
+        assert kill_res.status_code == 200
+        assert kill_res.json()["active"] is True
+
+    state2 = TradingLabState(stop_file=stop_file, db_path=db_path)
+    app2 = create_app(state=state2)
+    with TestClient(app2) as client2:
+        health_res = client2.get("/api/health")
+        assert health_res.status_code == 200
+        health_data = health_res.json()
+        assert health_data["kill_switch_active"] is True
+        assert health_data["kill_switch_reason"] is not None and "STOP exists" in health_data["kill_switch_reason"]
+
+        dec_res = client2.get("/api/decisions?run_id=persist-desk-001")
+        assert dec_res.status_code == 200
+        dec_data = dec_res.json()
+        assert len(dec_data) > 0
+        assert dec_data[0]["run_id"] == "persist-desk-001"
+
+        clear_res = client2.post(
+            "/api/kill-switch",
+            json={"active": False, "reason": "RESUMED_AFTER_RESTART"},
+        )
+        assert clear_res.status_code == 200
+        assert clear_res.json()["active"] is False
+        assert not stop_file.exists()
 
 
 def test_no_inline_comments_in_m6_code() -> None:

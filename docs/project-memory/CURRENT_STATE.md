@@ -54,8 +54,8 @@ Verified local Windows virtual environment output:
 - Ruff on `src/`, `tests/`, and `v3-zerodha/src`: passed (`All checks passed!`).
 - Python compileall: `python -m compileall -q src tests v3-zerodha/src` passed with exit code 0 on both 3.11.9 and 3.14.4.
 - `git diff --check`: exit code 0 (no whitespace errors or merge markers).
-- Full pytest suite: **467 passed in 7.94s** on genuine Python 3.11.9 (.venv311) and **467 passed in 4.98s** on Python 3.14.4 (.venv).
-- Genuine pytest-cov coverage: **88.12%** (exceeding mandatory 85% threshold with `--cov-fail-under=85`).
+- Full pytest suite: **472 passed in 7.58s** on genuine Python 3.11.9 (.venv311) and **472 passed in 3.92s** on Python 3.14.4 (.venv).
+- Genuine pytest-cov coverage: **88.17%** (exceeding mandatory 85% threshold with `--cov-fail-under=85`).
 - Secret scanning hook: `detect-secrets-hook --baseline .secrets.baseline` exited with code 0 on all tracked repository files, scanning `requirements.lock`.
 - Zero inline `#` comments verified across all new and edited files in M6.
 
@@ -66,7 +66,7 @@ Verified local Windows virtual environment output:
 - Milestone 3: COMPLETE and verified.
 - Milestone 4 (Time Machine): COMPLETE and hardened (ADR-026, ADR-027).
 - Milestone 5 (Paper Trading Engine & 7-Agent AI Research Desk): COMPLETE and hardened (ADR-028, ADR-029).
-- Milestone 6 (Local-First FastAPI Backend & Interactive Web Dashboard): COMPLETE and verified (ADR-030). Local REST API and self-contained web dashboard with zero external CDN dependencies, Emergency Stop kill switch toggle, isolated INR/USD portfolio cards with 0 conservation residual badge, 7-agent desk and Time Machine execution endpoints, and dual-Python verification with 88.12% coverage.
+- Milestone 6 (Local-First FastAPI Backend & Interactive Web Dashboard): COMPLETE and hardened (ADR-030, ADR-031). Local REST API and self-contained web dashboard with zero external CDN dependencies, DNS-rebinding & CSRF protection, CSP defensive headers, strict Pydantic bounds, thread-safe concurrency with exact 0 residual conservation, persistent SQLite audit trails, and dual-Python verification (472 passed, 88.17% coverage).
 
 ## Development workflow
 1. Claude independently verifies a frozen snapshot.

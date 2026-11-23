@@ -36,14 +36,15 @@ Current priority: Milestone 6 (Local-First FastAPI Backend & Interactive Web Das
    - Authoritative risk gate extended with sector concentration limits (`SECTOR_LIMIT_EXCEEDED`) and corporate event blackout (`EVENT_BLACKOUT`).
    - 7-Agent AI Research Desk: strict JSON schema `AgentEnvelope` with input hashing and non-finite input guards, framework-agnostic `LLMClient` with deterministic stubs, 3-tier memory (`WorkingState`, append-only SQLite `DecisionLog` with deterministic retrieval, read-only `HumanLessonsStore`), Market Analyst with evidence number verification and invalidation guards, Data Analyst with filing staleness checks, News Analyst with control character stripping, sentiment clamping, and blackout enforcement, Opportunity Scout with shortlist capping, Strategist with deterministic math verification of pricing and reward-to-risk, Daily Reporter EOD executive summary, and 4-stage pipeline `TradingDeskOrchestrator` with deterministic fan-out ordering and pre-Stage 4 kill switch checks.
    - 457 tests passing across the full suite on Python 3.11 and Python 3.14 with 87.91% coverage. Zero inline `#` comments.
-7. M6 Local-First FastAPI Backend & Interactive Web Dashboard implemented and verified (ADR-030):
+7. M6 Local-First FastAPI Backend & Interactive Web Dashboard implemented, hardened, and verified (ADR-030, ADR-031):
    - Strict Pydantic v2 schemas (`src/agentic_trading/api/schemas.py`) enforcing `paper_only=True` and positive finite bounds across all endpoints.
    - Thread-safe `TradingLabState` (`src/agentic_trading/api/state.py`) with isolated virtual INR and USD accounts, shared `KillSwitch`, SQLite `DecisionLog`, and offline LLM client stubs.
    - FastAPI REST endpoints (`src/agentic_trading/api/routes.py`) for system health, kill switch toggle, order submission/cancellation, portfolio reporting, backtesting, and 7-agent research desk cycles.
    - Self-contained local web dashboard (`src/agentic_trading/api/dashboard.py`) serving single-page HTML UI with zero external CDN dependencies, Emergency Stop button, and safe DOM manipulation.
    - Clean application lifecycle and localhost-only binding (`127.0.0.1:8000`) in `src/agentic_trading/api/app.py`.
-   - 467 tests passing across the full suite on Python 3.11 and Python 3.14 with 88.12% coverage. Zero inline `#` comments.
-8. Next: Independent external adversarial verification of M6 package, followed by strategy optimization and live market feed paper integration.
+   - Adversarial hardening (ADR-031): DNS-rebinding protection (`Host` header check), cross-origin CSRF mitigation (`Origin`/`Referer` check), defensive CSP and security headers, strict extra fields rejection (`extra="forbid"`), string length and collection size caps, and thread-safe portfolio evaluation.
+   - 472 tests passing across the full suite on Python 3.11 and Python 3.14 with 88.17% coverage. Zero inline `#` comments.
+8. Next: Independent external adversarial verification of M6 final package, followed by strategy optimization and live market feed paper integration.
 
 ## Review/remediation loop
 Claude independent verification -> ChatGPT triage and scoped technical direction -> Antigravity implementation and regression tests -> independent verification of the new snapshot. Avoid overlapping audits of unchanged code when a focused remediation cycle is more efficient.
