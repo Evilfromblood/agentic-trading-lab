@@ -1,6 +1,6 @@
 # Next Actions
 
-Current priority: Release Candidate 2 (RC2 Remediation across API, Orchestrator, Feed Bridge & Dashboard — ADR-036) is complete and verified. All milestones (M2a, M2b, M2c, M3, M4, M5, M6, M7, RC1, and RC2) are implemented, tested, and verified across Python 3.11 and Python 3.14. Release package `full-project-rc2-bundle.zip` is sealed for final external sign-off.
+Current priority: ADR-037 (Abstracted Dashboard UI with Active Cycle Inspector & Agent Chat Trace) is complete and verified. All milestones (M2a through M7, RC1, RC2, and ADR-037) are implemented, tested, and verified across Python 3.11 and Python 3.14.
 
 ## Immediate sequence
 1. Baseline M2a committed (`1b7e582`) and pushed to `origin/feature/reliable-foundation`.

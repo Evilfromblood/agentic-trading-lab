@@ -296,6 +296,19 @@ class DeskRunRequest(BaseModel):
         return clean
 
 
+class AgentChatEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    step: int
+    stage: str = Field(..., max_length=64)
+    agent: str = Field(..., max_length=64)
+    symbol: str | None = Field(default=None, max_length=64)
+    model: str = Field(..., max_length=64)
+    input_context: dict[str, Any] = {}
+    output_message: dict[str, Any] = {}
+    status: str = Field(..., max_length=32)
+
+
 class DeskRunResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -309,6 +322,46 @@ class DeskRunResponse(BaseModel):
     reconciled: bool
     llm_backend: str = Field(default="stub", max_length=64)
     feed_source: str = Field(default="synthetic", max_length=64)
+    timestamp: datetime
+    watchlist: list[str] = []
+    ollama_model: str = Field(default="gemma4:12b", max_length=64)
+    chat_trace: list[AgentChatEntry] = []
+    paper_only: Literal[True] = True
+
+
+class CycleSummaryItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str = Field(..., max_length=64)
+    timestamp: datetime
+    currency: str = Field(..., max_length=64)
+    watchlist: list[str]
+    feed_source: str = Field(..., max_length=64)
+    llm_backend: str = Field(..., max_length=64)
+    ollama_model: str = Field(..., max_length=64)
+    approved_count: int
+    rejected_count: int
+    reconciled: bool
+    paper_only: Literal[True] = True
+
+
+class CycleDetailResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str = Field(..., max_length=64)
+    timestamp: datetime
+    currency: str = Field(..., max_length=64)
+    watchlist: list[str]
+    feed_source: str = Field(..., max_length=64)
+    llm_backend: str = Field(..., max_length=64)
+    ollama_model: str = Field(..., max_length=64)
+    shortlist: list[str]
+    dropped: dict[str, str]
+    approved_orders: list[dict[str, Any]]
+    rejected_proposals: list[dict[str, Any]]
+    chat_trace: list[AgentChatEntry]
+    report_markdown: str
+    reconciled: bool
     paper_only: Literal[True] = True
 
 

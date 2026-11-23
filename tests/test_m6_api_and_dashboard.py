@@ -609,6 +609,121 @@ def test_restart_continuity(tmp_path: Path) -> None:
         assert not stop_file.exists()
 
 
+def test_cycles_endpoints_and_chat_trace(tmp_path: Path) -> None:
+    state = TradingLabState(
+        stop_file=tmp_path / "STOP",
+        db_path=tmp_path / "decisions.db",
+        initial_inr_deposit=Decimal("1000000"),
+    )
+    app = create_app(state=state)
+    with TestClient(app) as client:
+        desk_res = client.post(
+            "/api/desk/run",
+            json={
+                "watchlist": ["RELIANCE", "TCS"],
+                "exchange": "NSE",
+                "currency": "INR",
+                "run_id": "test-cycle-001",
+                "llm_backend": "stub",
+                "feed_source": "synthetic",
+            },
+        )
+        assert desk_res.status_code == 200
+        desk_data = desk_res.json()
+        assert desk_data["run_id"] == "test-cycle-001"
+        assert desk_data["paper_only"] is True
+        assert "timestamp" in desk_data
+        assert desk_data["watchlist"] == ["RELIANCE", "TCS"]
+        assert desk_data["ollama_model"] == "gemma4:12b"
+        assert isinstance(desk_data["chat_trace"], list)
+        assert len(desk_data["chat_trace"]) >= 4
+
+        stages_in_trace = {entry["stage"] for entry in desk_data["chat_trace"]}
+        assert "Stage 1 · Market Analyst" in stages_in_trace
+        assert "Stage 1 · Data Analyst" in stages_in_trace
+        assert "Stage 1 · News Analyst" in stages_in_trace
+        assert "Stage 2 · Opportunity Scout" in stages_in_trace
+        assert "Stage 3 · Strategist" in stages_in_trace
+        assert "Stage 4 · Risk & Execution" in stages_in_trace
+
+        for entry in desk_data["chat_trace"]:
+            assert isinstance(entry["step"], int)
+            assert entry["step"] >= 1
+            assert len(entry["stage"]) > 0
+            assert len(entry["agent"]) > 0
+            assert len(entry["model"]) > 0
+            assert isinstance(entry["input_context"], dict)
+            assert isinstance(entry["output_message"], dict)
+            assert entry["status"] in {"ok", "approved", "rejected", "no_trade", "missing"}
+
+        cycles_res = client.get("/api/cycles")
+        assert cycles_res.status_code == 200
+        cycles_list = cycles_res.json()
+        assert len(cycles_list) == 1
+        summary = cycles_list[0]
+        assert summary["run_id"] == "test-cycle-001"
+        assert summary["currency"] == "INR"
+        assert summary["watchlist"] == ["RELIANCE", "TCS"]
+        assert summary["feed_source"] == "synthetic"
+        assert summary["llm_backend"] == "stub"
+        assert summary["paper_only"] is True
+        assert isinstance(summary["approved_count"], int)
+        assert isinstance(summary["rejected_count"], int)
+        assert summary["reconciled"] is True
+
+        detail_res = client.get("/api/cycles/test-cycle-001")
+        assert detail_res.status_code == 200
+        detail = detail_res.json()
+        assert detail["run_id"] == "test-cycle-001"
+        assert detail["currency"] == "INR"
+        assert detail["watchlist"] == ["RELIANCE", "TCS"]
+        assert detail["feed_source"] == "synthetic"
+        assert detail["llm_backend"] == "stub"
+        assert detail["paper_only"] is True
+        assert len(detail["chat_trace"]) == len(desk_data["chat_trace"])
+        assert detail["reconciled"] is True
+        assert "DAILY DESK SUMMARY" in detail["report_markdown"]
+
+        bad_id_res = client.get("/api/cycles/invalid..path")
+        assert bad_id_res.status_code == 400
+
+        bad_format_res = client.get("/api/cycles/invalid%20space")
+        assert bad_format_res.status_code == 400
+
+        not_found_res = client.get("/api/cycles/nonexistent-run-id")
+        assert not_found_res.status_code == 404
+
+
+def test_dashboard_contains_cycle_inspector_and_chat_trace(tmp_path: Path) -> None:
+    state = TradingLabState(
+        stop_file=tmp_path / "STOP",
+        db_path=tmp_path / "decisions.db",
+    )
+    app = create_app(state=state)
+    with TestClient(app) as client:
+        resp = client.get("/")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "PAPER TRADING ONLY" in html
+        assert "Reviewing Paper Trading Cycle" in html
+        assert 'id="cycleSelect"' in html
+        assert 'id="tabOverviewBtn"' in html
+        assert 'id="tabChatBtn"' in html
+        assert 'id="tabOverviewPane"' in html
+        assert 'id="tabChatPane"' in html
+        assert 'id="overviewShortlist"' in html
+        assert 'id="overviewDropped"' in html
+        assert 'id="overviewOrdersContainer"' in html
+        assert 'id="chatTraceContainer"' in html
+        assert 'id="marketSelect"' in html
+        assert 'id="watchlistInput"' in html
+
+        external_scripts = re.findall(r'<script[^>]+src=["\']https?://', html)
+        assert len(external_scripts) == 0
+        external_css = re.findall(r'<link[^>]+href=["\']https?://', html)
+        assert len(external_css) == 0
+
+
 def test_no_inline_comments_in_m6_code() -> None:
     api_dir = Path(__file__).resolve().parent.parent / "src" / "agentic_trading" / "api"
     test_file = Path(__file__).resolve()

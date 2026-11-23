@@ -9,6 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from agentic_trading.api.schemas import (
     BacktestRequest,
     BacktestResponse,
+    CycleDetailResponse,
+    CycleSummaryItem,
     DecisionRecordItem,
     DeskRunRequest,
     DeskRunResponse,
@@ -192,3 +194,30 @@ def get_feed_candles(
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/cycles", response_model=list[CycleSummaryItem])
+def list_cycles(
+    state: Annotated[TradingLabState, Depends(get_lab_state)],
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[CycleSummaryItem]:
+    return state.list_cycles(limit=limit)
+
+
+@router.get("/cycles/{run_id}", response_model=CycleDetailResponse)
+def get_cycle(
+    run_id: str,
+    state: Annotated[TradingLabState, Depends(get_lab_state)],
+) -> CycleDetailResponse:
+    clean_id = run_id.strip()
+    if (
+        not clean_id
+        or len(clean_id) > 64
+        or not re.match(r"^[A-Za-z0-9._-]{1,64}$", clean_id)
+        or ".." in clean_id
+    ):
+        raise HTTPException(status_code=400, detail="Invalid run_id format")
+    detail = state.get_cycle_detail(clean_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Cycle '{clean_id}' not found")
+    return detail

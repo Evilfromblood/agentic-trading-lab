@@ -2,6 +2,32 @@
 
 Append concise entries in reverse chronological order. Record verified outcomes, not intentions.
 
+## 2026-11-24 — Abstracted Dashboard UI with Active Cycle Inspector & Agent Chat Trace (ADR-037)
+- Implemented ADR-037 providing active cycle inspection and multi-agent chat trace review:
+  - **Cycle Context & Chat Trace Capture (`orchestrator.py`)**:
+    - Added optional `chat_trace: tuple[dict[str, Any], ...] = ()` to `DeskCycleResult`.
+    - Added `_strip_control_chars` sanitizing untrusted inputs/outputs against ASCII control characters.
+    - Captured granular step-by-step entries across Stages 1–4: Market Analyst, Data Analyst, News Analyst, Opportunity Scout, Strategist, Risk Gate & Execution.
+    - Fixed `run_desk` in `state.py` to aggregate all watchlist targets before running `orchestrator.run_cycle`.
+  - **SQLite Cycle History Persistence (`memory.py`)**:
+    - Added `cycle_runs` table in `DecisionLog._init_sqlite`.
+    - Implemented `save_cycle_run`, `list_cycle_runs`, and `get_cycle_run` with parameterized queries and in-memory fallback list.
+  - **API Schemas & REST Endpoints (`schemas.py`, `state.py`, `routes.py`)**:
+    - Added `AgentChatEntry`, `CycleSummaryItem`, and `CycleDetailResponse` schemas with `extra="forbid"` and `paper_only: Literal[True] = True`.
+    - Enriched `DeskRunResponse` with `timestamp`, `watchlist`, `ollama_model`, and `chat_trace`.
+    - Implemented `GET /api/cycles` and `GET /api/cycles/{run_id}` with regex validation on `run_id` (`^[A-Za-z0-9._-]{1,64}$`) and path-traversal blocking (`..`).
+  - **Abstracted Dashboard UI Redesign (`dashboard.py`)**:
+    - Redesigned `DASHBOARD_HTML` in dark-slate palette (`max-width: 1120px`, `#0f172a`, `#1e293b`, `#334155`).
+    - Added Reviewing Cycle Context Strip displaying Cycle ID, timestamp, market, watchlist pills, feed source, model, and `<select id="cycleSelect">` history switcher.
+    - Two-Tab Inspection Workspace:
+      - Tab 1: Overview (candidate screening shortlist/dropped badges, executed paper orders table, risk rejections, collapsible raw report).
+      - Tab 2: Agent Chat (ordered chat exchange cards for Stages 1–4 showing step number, stage/agent/model/symbol badges, status pill, and structured "Input Context Seen" and "Agent / LLM Response" bubbles).
+    - Guaranteed zero external CDN scripts/styles and safe DOM construction strictly via `document.createElement` and `textContent`.
+  - **Testing & Verification**:
+    - Added `test_cycles_endpoints_and_chat_trace` and `test_dashboard_contains_cycle_inspector_and_chat_trace` in `test_m6_api_and_dashboard.py`.
+    - Added cycle list and detail assertions in `test_e2e_platform_audit.py`.
+    - Zero inline `#` comments verified across all new and modified files.
+
 ## 2026-11-24 — RC2 Remediation: Manual Order Risk Gating, Lock-Free Kill Switch, Sequential Snapshots & Cache HMAC Isolation (ADR-036)
 - Remediated all 8 audit findings across API, orchestrator, feed bridge, dashboard, and documentation for Release Candidate 2 (RC2):
   - **Manual Order Risk Gating & Server-Resolved Pricing (`schemas.py`, `state.py`, `routes.py`)**:

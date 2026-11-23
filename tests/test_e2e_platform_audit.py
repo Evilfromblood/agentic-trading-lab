@@ -124,6 +124,20 @@ def test_end_to_end_platform_lifecycle_audit(tmp_path: Path) -> None:
         assert len(dec_data) > 0
         assert dec_data[0]["run_id"] == run_id
 
+        cycles_res = client.get("/api/cycles")
+        assert cycles_res.status_code == 200
+        cycles_data = cycles_res.json()
+        assert len(cycles_data) >= 1
+        assert cycles_data[0]["run_id"] == run_id
+        assert cycles_data[0]["paper_only"] is True
+
+        cycle_detail_res = client.get(f"/api/cycles/{run_id}")
+        assert cycle_detail_res.status_code == 200
+        cycle_detail = cycle_detail_res.json()
+        assert cycle_detail["run_id"] == run_id
+        assert len(cycle_detail["chat_trace"]) >= 4
+        assert cycle_detail["paper_only"] is True
+
         ks_on = client.post(
             "/api/kill-switch",
             json={"active": True, "reason": "RC1_AUDIT_ENGAGE"},

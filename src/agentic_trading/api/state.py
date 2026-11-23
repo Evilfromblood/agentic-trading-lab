@@ -23,8 +23,11 @@ from agentic_trading.agents.orchestrator import (
 )
 from agentic_trading.agents.strategist import Strategist, TradingMandate
 from agentic_trading.api.schemas import (
+    AgentChatEntry,
     BacktestRequest,
     BacktestResponse,
+    CycleDetailResponse,
+    CycleSummaryItem,
     DecisionRecordItem,
     DeskRunRequest,
     DeskRunResponse,
@@ -634,48 +637,141 @@ class TradingLabState:
                 )
             )
 
-            result = orchestrator.run_cycle(
-                run_id=run_id,
-                as_of=as_of,
-                watchlist=watchlist_targets,
+        result = orchestrator.run_cycle(
+            run_id=run_id,
+            as_of=as_of,
+            watchlist=watchlist_targets,
+        )
+
+        approved_orders = [
+            {
+                "client_order_id": o.client_order_id,
+                "symbol": o.symbol,
+                "side": o.side,
+                "quantity": o.quantity,
+                "filled_quantity": o.filled_quantity,
+                "status": o.status.value,
+                "average_fill_price": str(o.average_fill_price.amount)
+                if o.average_fill_price
+                else None,
+            }
+            for o in result.orders
+        ]
+
+        rejected_proposals = [
+            {
+                "proposal_id": d.proposal_id,
+                "approved": d.approved,
+                "reasons": list(d.reasons),
+            }
+            for d in result.decisions
+            if not d.approved
+        ]
+
+        chat_trace = [
+            AgentChatEntry(
+                step=entry["step"],
+                stage=entry["stage"],
+                agent=entry["agent"],
+                symbol=entry.get("symbol"),
+                model=entry["model"],
+                input_context=entry.get("input_context", {}),
+                output_message=entry.get("output_message", {}),
+                status=entry["status"],
             )
+            for entry in result.chat_trace
+        ]
 
-            approved_orders = [
-                {
-                    "client_order_id": o.client_order_id,
-                    "symbol": o.symbol,
-                    "side": o.side,
-                    "quantity": o.quantity,
-                    "filled_quantity": o.filled_quantity,
-                    "status": o.status.value,
-                    "average_fill_price": str(o.average_fill_price.amount)
-                    if o.average_fill_price
-                    else None,
-                }
-                for o in result.orders
+        cycle_record = {
+            "run_id": run_id,
+            "timestamp": as_of.isoformat(),
+            "currency": request.currency,
+            "watchlist": request.watchlist,
+            "feed_source": request.feed_source,
+            "llm_backend": request.llm_backend,
+            "ollama_model": request.ollama_model,
+            "shortlist": list(result.shortlist),
+            "dropped": dict(result.dropped_candidates),
+            "approved_orders": approved_orders,
+            "rejected_proposals": rejected_proposals,
+            "chat_trace": [entry.model_dump() for entry in chat_trace],
+            "report_markdown": result.report,
+            "reconciled": result.reconciliation.is_reconciled,
+        }
+        with self._lock:
+            self.decision_log.save_cycle_run(cycle_record)
+
+        return DeskRunResponse(
+            run_id=run_id,
+            currency=request.currency,
+            shortlist=list(result.shortlist),
+            dropped=dict(result.dropped_candidates),
+            approved_orders=approved_orders,
+            rejected_proposals=rejected_proposals,
+            report_markdown=result.report,
+            reconciled=result.reconciliation.is_reconciled,
+            llm_backend=request.llm_backend,
+            feed_source=request.feed_source,
+            timestamp=as_of,
+            watchlist=request.watchlist,
+            ollama_model=request.ollama_model,
+            chat_trace=chat_trace,
+        )
+
+    def list_cycles(self, limit: int = 20) -> list[CycleSummaryItem]:
+        with self._lock:
+            runs = self.decision_log.list_cycle_runs(limit=limit)
+            items: list[CycleSummaryItem] = []
+            for r in runs:
+                items.append(
+                    CycleSummaryItem(
+                        run_id=r["run_id"],
+                        timestamp=datetime.fromisoformat(r["timestamp"]),
+                        currency=r["currency"],
+                        watchlist=list(r["watchlist"]),
+                        feed_source=r["feed_source"],
+                        llm_backend=r["llm_backend"],
+                        ollama_model=r["ollama_model"],
+                        approved_count=r["approved_count"],
+                        rejected_count=r["rejected_count"],
+                        reconciled=r["reconciled"],
+                    )
+                )
+            return items
+
+    def get_cycle_detail(self, run_id: str) -> CycleDetailResponse | None:
+        with self._lock:
+            data = self.decision_log.get_cycle_run(run_id)
+            if not data:
+                return None
+            chat_entries = [
+                AgentChatEntry(
+                    step=c["step"],
+                    stage=c["stage"],
+                    agent=c["agent"],
+                    symbol=c.get("symbol"),
+                    model=c["model"],
+                    input_context=c.get("input_context", {}),
+                    output_message=c.get("output_message", {}),
+                    status=c["status"],
+                )
+                for c in data.get("chat_trace", [])
             ]
-
-            rejected_proposals = [
-                {
-                    "proposal_id": d.proposal_id,
-                    "approved": d.approved,
-                    "reasons": list(d.reasons),
-                }
-                for d in result.decisions
-                if not d.approved
-            ]
-
-            return DeskRunResponse(
-                run_id=run_id,
-                currency=request.currency,
-                shortlist=list(result.shortlist),
-                dropped=dict(result.dropped_candidates),
-                approved_orders=approved_orders,
-                rejected_proposals=rejected_proposals,
-                report_markdown=result.report,
-                reconciled=result.reconciliation.is_reconciled,
-                llm_backend=request.llm_backend,
-                feed_source=request.feed_source,
+            return CycleDetailResponse(
+                run_id=data["run_id"],
+                timestamp=datetime.fromisoformat(data["timestamp"]),
+                currency=data["currency"],
+                watchlist=list(data["watchlist"]),
+                feed_source=data["feed_source"],
+                llm_backend=data["llm_backend"],
+                ollama_model=data["ollama_model"],
+                shortlist=list(data["shortlist"]),
+                dropped=dict(data["dropped"]),
+                approved_orders=list(data["approved_orders"]),
+                rejected_proposals=list(data["rejected_proposals"]),
+                chat_trace=chat_entries,
+                report_markdown=data["report_markdown"],
+                reconciled=data["reconciled"],
             )
 
     def get_feed_candles(

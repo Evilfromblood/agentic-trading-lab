@@ -51,6 +51,7 @@ class DecisionLog:
 
     def __init__(self, db_path: Path | str | None = None) -> None:
         self._records: list[DecisionRecord] = []
+        self._cycle_runs: list[dict[str, Any]] = []
         self._db_path = Path(db_path) if db_path else None
         if self._db_path:
             self._init_sqlite()
@@ -70,6 +71,27 @@ class DecisionLog:
                         inputs_hash TEXT NOT NULL,
                         shortlist_rank INTEGER,
                         record_json TEXT NOT NULL
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS cycle_runs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        run_id TEXT NOT NULL UNIQUE,
+                        timestamp TEXT NOT NULL,
+                        currency TEXT NOT NULL,
+                        watchlist_json TEXT NOT NULL,
+                        feed_source TEXT NOT NULL,
+                        llm_backend TEXT NOT NULL,
+                        ollama_model TEXT NOT NULL,
+                        shortlist_json TEXT NOT NULL,
+                        dropped_json TEXT NOT NULL,
+                        approved_orders_json TEXT NOT NULL,
+                        rejected_proposals_json TEXT NOT NULL,
+                        chat_trace_json TEXT NOT NULL,
+                        report_markdown TEXT NOT NULL,
+                        reconciled INTEGER NOT NULL
                     )
                     """
                 )
@@ -150,6 +172,156 @@ class DecisionLog:
         if run_id is None:
             return tuple(self._records)
         return tuple(r for r in self._records if r.run_id == run_id)
+
+    def save_cycle_run(self, data: Mapping[str, Any]) -> None:
+        record = dict(data)
+        self._cycle_runs.append(record)
+        if self._db_path:
+            ts = (
+                data["timestamp"]
+                if isinstance(data["timestamp"], str)
+                else data["timestamp"].isoformat()
+            )
+            reconciled_val = 1 if data.get("reconciled", True) else 0
+            conn = sqlite3.connect(self._db_path)
+            try:
+                with conn:
+                    conn.execute(
+                        """
+                        INSERT OR REPLACE INTO cycle_runs
+                        (run_id, timestamp, currency, watchlist_json, feed_source, llm_backend, ollama_model, shortlist_json, dropped_json, approved_orders_json, rejected_proposals_json, chat_trace_json, report_markdown, reconciled)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            data["run_id"],
+                            ts,
+                            data["currency"],
+                            json.dumps(data["watchlist"], sort_keys=True),
+                            data["feed_source"],
+                            data["llm_backend"],
+                            data["ollama_model"],
+                            json.dumps(data["shortlist"], sort_keys=True),
+                            json.dumps(data["dropped"], sort_keys=True),
+                            json.dumps(data["approved_orders"], sort_keys=True),
+                            json.dumps(data["rejected_proposals"], sort_keys=True),
+                            json.dumps(data["chat_trace"], sort_keys=True),
+                            data["report_markdown"],
+                            reconciled_val,
+                        ),
+                    )
+            finally:
+                conn.close()
+
+    def list_cycle_runs(self, limit: int = 25) -> tuple[dict[str, Any], ...]:
+        if self._db_path and self._db_path.exists():
+            conn = sqlite3.connect(self._db_path)
+            try:
+                with conn:
+                    cursor = conn.execute(
+                        """
+                        SELECT run_id, timestamp, currency, watchlist_json, feed_source, llm_backend, ollama_model, approved_orders_json, rejected_proposals_json, reconciled
+                        FROM cycle_runs ORDER BY id DESC LIMIT ?
+                        """,
+                        (limit,),
+                    )
+                    summaries: list[dict[str, Any]] = []
+                    for row in cursor.fetchall():
+                        (
+                            run_id,
+                            ts,
+                            curr,
+                            wl_json,
+                            feed_src,
+                            llm_be,
+                            o_mod,
+                            ord_json,
+                            rej_json,
+                            rec,
+                        ) = row
+                        approved_orders = json.loads(ord_json)
+                        rejected_proposals = json.loads(rej_json)
+                        summaries.append(
+                            {
+                                "run_id": run_id,
+                                "timestamp": ts,
+                                "currency": curr,
+                                "watchlist": json.loads(wl_json),
+                                "feed_source": feed_src,
+                                "llm_backend": llm_be,
+                                "ollama_model": o_mod,
+                                "approved_count": len(approved_orders),
+                                "rejected_count": len(rejected_proposals),
+                                "reconciled": bool(rec),
+                            }
+                        )
+                    return tuple(summaries)
+            finally:
+                conn.close()
+
+        summaries_mem: list[dict[str, Any]] = []
+        for c in self._cycle_runs[-limit:][::-1]:
+            ts = (
+                c["timestamp"]
+                if isinstance(c["timestamp"], str)
+                else c["timestamp"].isoformat()
+            )
+            summaries_mem.append(
+                {
+                    "run_id": c["run_id"],
+                    "timestamp": ts,
+                    "currency": c["currency"],
+                    "watchlist": list(c["watchlist"]),
+                    "feed_source": c["feed_source"],
+                    "llm_backend": c["llm_backend"],
+                    "ollama_model": c["ollama_model"],
+                    "approved_count": len(c["approved_orders"]),
+                    "rejected_count": len(c["rejected_proposals"]),
+                    "reconciled": bool(c.get("reconciled", True)),
+                }
+            )
+        return tuple(summaries_mem)
+
+    def get_cycle_run(self, run_id: str) -> dict[str, Any] | None:
+        if self._db_path and self._db_path.exists():
+            conn = sqlite3.connect(self._db_path)
+            try:
+                with conn:
+                    cursor = conn.execute(
+                        """
+                        SELECT run_id, timestamp, currency, watchlist_json, feed_source, llm_backend, ollama_model, shortlist_json, dropped_json, approved_orders_json, rejected_proposals_json, chat_trace_json, report_markdown, reconciled
+                        FROM cycle_runs WHERE run_id = ?
+                        """,
+                        (run_id,),
+                    )
+                    row = cursor.fetchone()
+                    if not row:
+                        return None
+                    return {
+                        "run_id": row[0],
+                        "timestamp": row[1],
+                        "currency": row[2],
+                        "watchlist": json.loads(row[3]),
+                        "feed_source": row[4],
+                        "llm_backend": row[5],
+                        "ollama_model": row[6],
+                        "shortlist": json.loads(row[7]),
+                        "dropped": json.loads(row[8]),
+                        "approved_orders": json.loads(row[9]),
+                        "rejected_proposals": json.loads(row[10]),
+                        "chat_trace": json.loads(row[11]),
+                        "report_markdown": row[12],
+                        "reconciled": bool(row[13]),
+                    }
+            finally:
+                conn.close()
+
+        for c in reversed(self._cycle_runs):
+            if c["run_id"] == run_id:
+                item = dict(c)
+                if not isinstance(item["timestamp"], str):
+                    item["timestamp"] = item["timestamp"].isoformat()
+                return item
+        return None
 
 
 class HumanLessonsStore:

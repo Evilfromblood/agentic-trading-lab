@@ -56,6 +56,17 @@ class DeskCycleResult:
     orders: tuple[PaperOrder, ...]
     reconciliation: ReconciliationReport
     report: str
+    chat_trace: tuple[dict[str, Any], ...] = ()
+
+
+def _strip_control_chars(obj: Any) -> Any:
+    if isinstance(obj, str):
+        return "".join(ch for ch in obj if ch >= " " or ch in "\n\r\t")
+    if isinstance(obj, dict):
+        return {str(_strip_control_chars(k)): _strip_control_chars(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_strip_control_chars(x) for x in obj]
+    return obj
 
 
 class TradingDeskOrchestrator:
@@ -171,6 +182,79 @@ class TradingDeskOrchestrator:
                     )
                 envelopes[(agent_type, sym)] = envelope
 
+        chat_trace: list[dict[str, Any]] = []
+        step_counter = 1
+
+        for t in watchlist:
+            sym = t.instrument.symbol
+            m_env = envelopes[("market", sym)]
+            d_env = envelopes[("data", sym)]
+            n_env = envelopes[("news", sym)]
+
+            m_status = "missing" if m_env.errors else "ok"
+            chat_trace.append(
+                _strip_control_chars(
+                    {
+                        "step": step_counter,
+                        "stage": "Stage 1 · Market Analyst",
+                        "agent": "market_analyst",
+                        "symbol": sym,
+                        "model": m_env.model,
+                        "input_context": {
+                            "symbol": sym,
+                            "bars_count": len(t.context.bars),
+                            "close": str(t.current_candle.close),
+                            "interval": "1d",
+                        },
+                        "output_message": dict(m_env.output),
+                        "status": m_status,
+                    }
+                )
+            )
+            step_counter += 1
+
+            d_status = "missing" if d_env.errors else "ok"
+            chat_trace.append(
+                _strip_control_chars(
+                    {
+                        "step": step_counter,
+                        "stage": "Stage 1 · Data Analyst",
+                        "agent": "data_analyst",
+                        "symbol": sym,
+                        "model": d_env.model,
+                        "input_context": {
+                            "symbol": sym,
+                            "has_fundamental_snapshot": t.fundamental_snapshot is not None,
+                            "as_of": as_of.isoformat(),
+                        },
+                        "output_message": dict(d_env.output),
+                        "status": d_status,
+                    }
+                )
+            )
+            step_counter += 1
+
+            n_status = "missing" if n_env.errors else "ok"
+            chat_trace.append(
+                _strip_control_chars(
+                    {
+                        "step": step_counter,
+                        "stage": "Stage 1 · News Analyst",
+                        "agent": "news_analyst",
+                        "symbol": sym,
+                        "model": n_env.model,
+                        "input_context": {
+                            "symbol": sym,
+                            "news_count": len(t.news_articles),
+                            "events_count": len(t.scheduled_events),
+                        },
+                        "output_message": dict(n_env.output),
+                        "status": n_status,
+                    }
+                )
+            )
+            step_counter += 1
+
         candidate_profiles: list[CandidateProfile] = []
         for t in watchlist:
             sym = t.instrument.symbol
@@ -188,6 +272,28 @@ class TradingDeskOrchestrator:
             )
 
         scout_result = self.opportunity_scout.scout(candidate_profiles)
+
+        scout_status = "ok" if scout_result.shortlist else "no_trade"
+        chat_trace.append(
+            _strip_control_chars(
+                {
+                    "step": step_counter,
+                    "stage": "Stage 2 · Opportunity Scout",
+                    "agent": "opportunity_scout",
+                    "symbol": None,
+                    "model": "deterministic_scout",
+                    "input_context": {
+                        "candidate_symbols": [t.instrument.symbol for t in watchlist]
+                    },
+                    "output_message": {
+                        "shortlist": list(scout_result.shortlist),
+                        "dropped": dict(scout_result.dropped),
+                    },
+                    "status": scout_status,
+                }
+            )
+        )
+        step_counter += 1
 
         proposals: list[TradeProposal] = []
         proposal_by_ticker: dict[str, TradeProposal] = {}
@@ -211,6 +317,29 @@ class TradingDeskOrchestrator:
             if proposal is not None:
                 proposals.append(proposal)
                 proposal_by_ticker[sym] = proposal
+
+            strat_status = "approved" if proposal is not None else "no_trade"
+            chat_trace.append(
+                _strip_control_chars(
+                    {
+                        "step": step_counter,
+                        "stage": "Stage 3 · Strategist",
+                        "agent": "strategist",
+                        "symbol": sym,
+                        "model": strat_env.model,
+                        "input_context": {
+                            "symbol": sym,
+                            "market_price": str(target.current_candle.close),
+                            "regime": m_env.output.get("market_regime"),
+                            "sentiment": n_env.output.get("sentiment_score"),
+                            "data_quality": d_env.output.get("data_quality"),
+                        },
+                        "output_message": dict(strat_env.output),
+                        "status": strat_status,
+                    }
+                )
+            )
+            step_counter += 1
 
         decisions: list[ProposalRiskDecision] = []
         orders: list[PaperOrder] = []
@@ -270,6 +399,36 @@ class TradingDeskOrchestrator:
                 if current_snapshot.total_equity.amount > peak_equity.amount:
                     peak_equity = current_snapshot.total_equity
 
+            gate_status = "approved" if decision.approved else "rejected"
+            chat_trace.append(
+                _strip_control_chars(
+                    {
+                        "step": step_counter,
+                        "stage": "Stage 4 · Risk & Execution",
+                        "agent": "risk_gate",
+                        "symbol": sym,
+                        "model": "deterministic_gate",
+                        "input_context": {
+                            "symbol": sym,
+                            "side": proposal.side,
+                            "quantity": proposal.quantity,
+                            "entry_price": str(target.current_candle.close),
+                            "stop_loss": str(proposal.stop_loss.amount) if proposal.stop_loss else None,
+                            "take_profit": str(proposal.take_profit.amount) if proposal.take_profit else None,
+                            "portfolio_equity": str(current_snapshot.total_equity.amount),
+                        },
+                        "output_message": {
+                            "approved": decision.approved,
+                            "reasons": list(decision.reasons),
+                            "max_allowed_quantity": decision.max_allowed_quantity,
+                            "paper_order_id": paper_order.client_order_id if paper_order else None,
+                            "paper_order_status": paper_order.status.value if paper_order else None,
+                        },
+                        "status": gate_status,
+                    }
+                )
+            )
+            step_counter += 1
 
             record = DecisionRecord(
                 run_id=run_id,
@@ -322,4 +481,5 @@ class TradingDeskOrchestrator:
             orders=tuple(orders),
             reconciliation=reconciliation,
             report=report,
+            chat_trace=tuple(chat_trace),
         )

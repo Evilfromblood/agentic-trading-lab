@@ -606,3 +606,32 @@ Append decisions; do not silently rewrite historical decisions. Mark superseded 
   - Python compileall: passed with exit code 0 on both Python 3.11 and 3.14.
   - Secret scanning: `detect-secrets-hook --baseline .secrets.baseline` passed with 0 unbaselined secrets.
   - Zero inline `#` comments verified across all git diff additions.
+
+
+## ADR-037 (Abstracted Dashboard UI with Active Cycle Inspector & Agent Chat Trace)
+- **Status:** Accepted (2026-11-24)
+- **Context:** To address visibility into multi-agent research operations during paper trading, the dashboard required an active cycle inspector answering "Which Paper Trading Cycle Is It Reviewing?" and a detailed agent exchange trace answering "Which Chat Is It Seeing?". Furthermore, historical cycle runs needed durable SQLite persistence and REST API exposure.
+- **Decisions:**
+  1. **Cycle Context & Step-by-Step Chat Trace Capture (`src/agentic_trading/agents/orchestrator.py`):**
+     - Extended `DeskCycleResult` with optional `chat_trace: tuple[dict[str, Any], ...] = ()` for backward compatibility.
+     - Implemented `_strip_control_chars` sanitizing untrusted inputs/outputs to prevent ASCII/ANSI control character injection.
+     - Sequentially recorded granular entries across Stage 1 (Market Analyst, Data Analyst, News Analyst per target), Stage 2 (Opportunity Scout), Stage 3 (Strategist per shortlisted target), and Stage 4 (Risk Gate & Execution per proposal).
+     - Each entry captures `step`, `stage`, `agent`, `symbol`, `model`, `input_context`, `output_message`, and `status` (`ok`, `approved`, `rejected`, `no_trade`, `missing`).
+  2. **SQLite Cycle Run Persistence (`src/agentic_trading/agents/memory.py`):**
+     - Added `cycle_runs` table in `DecisionLog._init_sqlite` with columns for `run_id`, `timestamp`, `currency`, `watchlist_json`, `feed_source`, `llm_backend`, `ollama_model`, `shortlist_json`, `dropped_json`, `approved_orders_json`, `rejected_proposals_json`, `chat_trace_json`, `report_markdown`, and `reconciled`.
+     - Implemented `save_cycle_run(data)`, `list_cycle_runs(limit=25)`, and `get_cycle_run(run_id)` with parameterized queries and in-memory fallback list.
+  3. **Pydantic Schemas & REST API Endpoints (`src/agentic_trading/api/{schemas.py,state.py,routes.py}`):**
+     - Added `AgentChatEntry`, `CycleSummaryItem`, `CycleDetailResponse` schemas with `extra="forbid"` and `paper_only: Literal[True] = True`.
+     - Enriched `DeskRunResponse` with `timestamp`, `watchlist`, `ollama_model`, and `chat_trace`.
+     - Implemented `GET /api/cycles` returning recent cycle summaries and `GET /api/cycles/{run_id}` returning full cycle detail, validating `run_id` against `^[A-Za-z0-9._-]{1,64}$` and path-traversal tokens (`..`).
+  4. **Abstracted Dashboard UI Redesign (`src/agentic_trading/api/dashboard.py`):**
+     - Replaced raw JSON display with an abstracted dark-slate UI (`max-width: 1120px`, dark palette `#0f172a`, `#1e293b`, `#334155`, accents `#38bdf8`, `#22c55e`, `#ef4444`, `#eab308`).
+     - Added Reviewing Cycle Context Strip displaying Cycle ID, timestamp, market, watchlist pills, feed source, model, and `<select id="cycleSelect">` history switcher.
+     - Abstracted INR and USD portfolio cards displaying equity, cash, holdings, realized P&L, open positions, and conditional reconciliation warnings.
+     - Two-Tab Inspection Workspace:
+       - **Tab 1: Overview:** Candidate screening shortlist/dropped badges, executed paper orders table, risk rejections, and collapsible raw report.
+       - **Tab 2: Agent Chat:** Ordered exchange cards for Stages 1–4 showing step number, stage/agent/model/symbol badges, status pill, and structured "Input Context Seen" and "Agent / LLM Response" bubbles.
+     - Ensured zero external CDN dependencies and pure DOM construction via `document.createElement` and `textContent`.
+  5. **Regression Verification (`tests/test_m6_api_and_dashboard.py`, `tests/test_e2e_platform_audit.py`):**
+     - Added comprehensive regression tests verifying cycle trace capture, summary listing, detail retrieval, invalid run_id rejection (400), nonexistent run_id handling (404), and UI DOM element assertions with zero inline `#` comments.
+- **Consequences:** Provides complete auditability and interactive review of multi-agent paper trading cycles and agent reasoning directly within the local dashboard without leaking credentials or compromising isolation.
