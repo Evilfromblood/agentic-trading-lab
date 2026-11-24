@@ -2,6 +2,27 @@
 
 Append concise entries in reverse chronological order. Record verified outcomes, not intentions.
 
+## 2026-11-24 — Stabilize Mark Prices & Sell Execution, Fix Backtest Expectancy, Eliminate Chart Axis Collisions & Plain-English Risk (ADR-044 / v1.4.1)
+- Implemented ADR-044 stabilizing mark prices, locking sell executions to displayed marks, fixing backtest expectancy bindings, eliminating candlestick right-axis collisions, and providing plain-English risk guidance:
+  - **Mark-Price Consistency Across Passive Polls (`state.py`)**:
+    - Implemented `_get_or_fetch_mark_price(exchange, symbol, currency)` reading cached `_mark_prices` without incrementing simulation steps.
+    - Synchronized `get_portfolio_summary`, `get_positions`, and `get_pnl_summary` so `market_value` and `unrealized_pnl` match to the exact cent across every card and table without drifting between polls.
+  - **Exact Close Execution at Displayed Mark Price (`state.py`)**:
+    - Updated `close_position` to execute against the exact displayed `mark_price` from `_mark_prices` (falling back to `_get_or_fetch_mark_price` if unpopulated), locking in displayed P&L (minus statutory slippage and fees).
+    - Cleared liquidated positions from `_mark_prices`.
+  - **Backtest Expectancy Binding (`dashboard.py`)**:
+    - Bound `backtestExpectancy` to `Number(data.expectancy ?? data.expectancy_per_trade ?? data.metrics?.expectancy_per_trade ?? data.metrics?.expectancy ?? 0).toFixed(2) + " " + currency`, preventing `undefined INR`.
+  - **Candlestick Canvas Right-Axis Collision Avoidance (`dashboard.py`)**:
+    - Widened canvas right margin to `padRight = 96`.
+    - Enforced a minimum `18px` vertical spacing between adjacent active AI pill badges (`badgeY`).
+    - Suppressed gray horizontal grid tick price text within `18px` of active AI pills.
+  - **Plain-English Risk Rejections & Active Brackets Table (`schemas.py`, `dashboard.py`)**:
+    - Added `stop_loss` and `take_profit` fields to `PositionItem` and rendered them in the Open Portfolio Positions table.
+    - Added `formatRiskReason` and `formatRiskReasons` translating risk rejection codes into plain-English operator guidance.
+  - **Testing & Multi-Python Verification**:
+    - Added 3 regression tests in `tests/test_m12_pnl_and_beginner_ux.py`.
+    - Verified all 534 tests passing with >88% coverage on Python 3.11 and Python 3.14. Zero inline `#` comments.
+
 ## 2026-11-24 — Unique Per-Symbol Pricing, Gain/Loss Scorecard, Closed Trades History & Beginner UX (ADR-043 / v1.4.0)
 - Implemented ADR-043 bringing realistic per-symbol market pricing, dynamic Gain/Loss scorecard, closed trades history, practice scenarios simulator, and beginner-guided workstation UX:
   - **Deterministic Per-Symbol Market Pricing (`feed_bridge.py`)**:

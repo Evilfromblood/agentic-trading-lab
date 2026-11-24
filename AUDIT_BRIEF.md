@@ -401,3 +401,28 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 - **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
 - **Secrets:** 0 leaks detected against `.secrets.baseline`.
 - **Inline `#` Comments:** 0 comments in git diff.
+
+---
+
+## 17. Milestone 12 Polish — Mark-Price Consistency, Exact Close Execution & Chart Axis Collision Avoidance (ADR-044), Verified 2026-11-24
+
+**Files:**
+- `src/agentic_trading/api/{schemas,state,dashboard}.py`
+- `tests/test_m12_pnl_and_beginner_ux.py`
+
+| Area | Component | Behaviour & Hardening | Verification Test |
+|---|---|---|---|
+| Mark Price Cache | `TradingLabState` | `_get_or_fetch_mark_price(exchange, symbol, currency)` caches mark prices without incrementing simulation steps. Synchronized `get_portfolio_summary`, `get_positions`, and `get_pnl_summary` so `market_value` and `unrealized_pnl` match to the exact cent across every card and table without drifting between polls. | `test_mark_price_consistency_across_repeated_passive_polls` |
+| Close Execution | `close_position` | Executes at the exact displayed mark price from `_mark_prices` (falling back to `_get_or_fetch_mark_price` if unpopulated), locking in displayed P&L (minus statutory slippage and fees). Clears liquidated positions from `_mark_prices`. | `test_close_position_executes_at_exact_displayed_mark_price` |
+| Backtest UI | Expectancy Binding | Safely binds `backtestExpectancy` to `Number(data.expectancy ?? data.expectancy_per_trade ?? data.metrics?.expectancy_per_trade ?? data.metrics?.expectancy ?? 0).toFixed(2) + " " + currency`, eliminating `undefined INR`. | `test_dashboard_expectancy_risk_mapping_and_chart_collision_avoidance` |
+| Candlestick Chart | Axis Collision Avoidance | Widened right axis margin to `padRight = 96`. Pre-collected active AI pills (`BUY`, `TARGET`, `STOP`), sorted vertically, and enforced minimum `18px` vertical spacing (`badgeY`). Suppressed gray horizontal grid tick price text within `18px` of active AI pills. | `test_dashboard_expectancy_risk_mapping_and_chart_collision_avoidance` |
+| Risk Explanations | Plain-English Guidance | `formatRiskReason` and `formatRiskReasons` mapping risk rejection codes (`POSITION_CONCENTRATION_EXCEEDED`, `MAX_OPEN_POSITIONS_EXCEEDED`, `INSUFFICIENT_CASH`, `EVENT_BLACKOUT`, etc.) into actionable plain-English text in Overview and AI Trade Plans views. | `test_dashboard_expectancy_risk_mapping_and_chart_collision_avoidance` |
+| Position Table | Active Brackets | Added `stop_loss` and `take_profit` fields to `PositionItem` and displayed active Stop Loss and Sell Target prices in the Open Portfolio Positions table. | `test_mark_price_consistency_across_repeated_passive_polls`, `test_dashboard_expectancy_risk_mapping_and_chart_collision_avoidance` |
+| Hygiene | Zero Inline Comments | Automated AST and tokenizer test verifying 0 inline `#` comments across all modified/new files. | `test_no_inline_comments_in_m12_code` |
+
+### Suite Verification:
+- **Pytest:** 534 passed on Python 3.11 (`.venv311`) and Python 3.14 (`.venv`).
+- **Coverage:** **>88%** (exceeds mandatory `--cov-fail-under=85`).
+- **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
+- **Secrets:** 0 leaks detected against `.secrets.baseline`.
+- **Inline `#` Comments:** 0 comments in git diff.

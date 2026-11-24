@@ -656,6 +656,8 @@ class PositionItem(BaseModel):
     market_value: Decimal
     unrealized_pnl: Decimal
     unrealized_pnl_pct: Decimal
+    stop_loss: Decimal | None = None
+    take_profit: Decimal | None = None
 
 
 class PositionsListResponse(BaseModel):

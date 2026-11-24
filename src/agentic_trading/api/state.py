@@ -236,6 +236,32 @@ class TradingLabState:
                 self.stop_file.unlink()
         return self.kill_switch.is_active()
 
+    def _get_or_fetch_mark_price(
+        self,
+        exchange: Exchange,
+        symbol: str,
+        currency: Currency,
+    ) -> Money:
+        key = (exchange, symbol)
+        if key in self._mark_prices:
+            return self._mark_prices[key]
+        fetch_res = self.feed_bridge.fetch_candles(
+            exchange=exchange,
+            symbol=symbol,
+            interval=CandleInterval.D1,
+            bars_count=1,
+            mode="synthetic",
+            sim_step=self._sim_step,
+            scenario_bias=self._scenario_bias,
+        )
+        if fetch_res.candles:
+            price = fetch_res.candles[-1].close
+        else:
+            price = Decimal("100.00")
+        m = Money(price, currency)
+        self._mark_prices[key] = m
+        return m
+
     def get_portfolio_summary(
         self,
         currency_str: str,
@@ -247,16 +273,16 @@ class TradingLabState:
             moment = as_of or datetime.now(timezone.utc)
             report = broker.reconcile(moment)
             marks: dict[tuple[Exchange, str], Money] = {}
-            for key, pos in broker.portfolio._positions.items():
+            for (ex, sym), pos in broker.portfolio._positions.items():
                 if pos.quantity != 0:
-                    marks[key] = self._mark_prices.get(key, pos.average_cost)
+                    marks[(ex, sym)] = self._get_or_fetch_mark_price(ex, sym, currency)
             snapshot = broker.portfolio.snapshot(currency, marks, moment)
 
             positions_list: list[PositionSummary] = []
             for (ex, sym), pos in snapshot.positions.items():
                 if pos.quantity != 0:
-                    mark_amount = marks.get((ex, sym), pos.average_cost).amount
-                    mkt_val = mark_amount * Decimal(pos.quantity)
+                    mark_amount = marks[(ex, sym)].amount
+                    mkt_val = mark_amount * Decimal(str(pos.quantity))
                     unrealized = mkt_val - pos.cost_basis.amount
                     positions_list.append(
                         PositionSummary(
@@ -1182,14 +1208,21 @@ class TradingLabState:
                 curr = b.portfolio.currency
                 for (ex, sym), pos in b.portfolio._positions.items():
                     if pos.quantity != 0:
-                        mark_amount = self._mark_prices.get((ex, sym), pos.average_cost).amount
-                        mkt_val = mark_amount * Decimal(pos.quantity)
+                        mark_money = self._get_or_fetch_mark_price(ex, sym, curr)
+                        mark_amount = mark_money.amount
+                        mkt_val = mark_amount * Decimal(str(pos.quantity))
                         unrealized = mkt_val - pos.cost_basis.amount
                         pnl_pct = (
                             (unrealized / pos.cost_basis.amount * Decimal("100"))
                             if pos.cost_basis.amount > Decimal("0")
                             else Decimal("0")
                         )
+                        brackets = self._position_brackets.get((ex, sym), {})
+                        sl_obj = brackets.get("stop_loss")
+                        tp_obj = brackets.get("take_profit")
+                        tick = Decimal("0.05") if curr == Currency.INR else Decimal("0.01")
+                        sl_val = sl_obj.amount if sl_obj else (pos.average_cost.amount * Decimal("0.96")).quantize(tick)
+                        tp_val = tp_obj.amount if tp_obj else (pos.average_cost.amount * Decimal("1.08")).quantize(tick)
                         items.append(
                             PositionItem(
                                 currency=curr.value,
@@ -1201,6 +1234,8 @@ class TradingLabState:
                                 market_value=mkt_val,
                                 unrealized_pnl=unrealized,
                                 unrealized_pnl_pct=round(pnl_pct, 2),
+                                stop_loss=sl_val,
+                                take_profit=tp_val,
                             )
                         )
             return PositionsListResponse(positions=items)
@@ -1229,15 +1264,10 @@ class TradingLabState:
                 lot_size=1,
             )
 
-            feed_res = self.feed_bridge.fetch_candles(
-                exchange=exchange,
-                symbol=symbol,
-                interval=CandleInterval.D1,
-                bars_count=1,
-                mode="synthetic",
-            )
-            feed_price = feed_res.candles[-1].close
-            self._mark_prices[(exchange, symbol)] = Money(feed_price, currency)
+            if (exchange, symbol) in self._mark_prices:
+                feed_price = self._mark_prices[(exchange, symbol)].amount
+            else:
+                feed_price = self._get_or_fetch_mark_price(exchange, symbol, currency).amount
             now = datetime.now(timezone.utc)
             if broker.portfolio.ledger.entries:
                 last_ts = broker.portfolio.ledger.entries[-1].timestamp
@@ -1298,6 +1328,8 @@ class TradingLabState:
             })
             if (exchange, symbol) in self._position_brackets and pos.quantity - qty_to_sell <= 0:
                 self._position_brackets.pop((exchange, symbol), None)
+            if pos.quantity - qty_to_sell <= 0:
+                self._mark_prices.pop((exchange, symbol), None)
 
         return OrderResponse(
             client_order_id=order.client_order_id,
@@ -1598,6 +1630,7 @@ class TradingLabState:
                     }
                     self._closed_trades.append(trade_record)
                     self._position_brackets.pop((exchange, symbol), None)
+                    self._mark_prices.pop((exchange, symbol), None)
 
                     triggered_events.append({
                         "symbol": symbol,
@@ -1660,9 +1693,9 @@ class TradingLabState:
                 curr_str: Literal["INR", "USD"] = "INR" if currency == Currency.INR else "USD"
                 moment = datetime.now(timezone.utc)
                 marks: dict[tuple[Exchange, str], Money] = {}
-                for key, pos in broker.portfolio._positions.items():
+                for (ex, sym), pos in broker.portfolio._positions.items():
                     if pos.quantity != 0:
-                        marks[key] = self._mark_prices.get(key, pos.average_cost)
+                        marks[(ex, sym)] = self._get_or_fetch_mark_price(ex, sym, currency)
                 snap = broker.portfolio.snapshot(currency, marks, moment)
                 total_equity = snap.total_equity.amount
                 net_pnl = total_equity - initial_capital
@@ -1691,7 +1724,7 @@ class TradingLabState:
                 open_pnls: list[Decimal] = []
                 for (ex, sym), pos in broker.portfolio._positions.items():
                     if pos.quantity != 0:
-                        mk = self._mark_prices.get((ex, sym), pos.average_cost).amount
+                        mk = marks[(ex, sym)].amount
                         p_pnl = (mk - pos.average_cost.amount) * Decimal(str(pos.quantity))
                         open_pnls.append(p_pnl)
 

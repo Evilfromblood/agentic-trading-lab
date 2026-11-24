@@ -200,6 +200,120 @@ def test_dashboard_m12_dom_elements_and_zero_external_links(client: TestClient) 
         assert forbidden not in html, f"Found external reference: {forbidden}"
 
 
+def test_mark_price_consistency_across_repeated_passive_polls(tmp_path: Path) -> None:
+    state = TradingLabState(stop_file=tmp_path / "stop.txt", db_path=tmp_path / "decisions.db")
+    app = create_app(state=state)
+    local_client = TestClient(app)
+
+    order_req = {
+        "run_id": "POLL-TEST-1",
+        "exchange": "NSE",
+        "symbol": "RELIANCE",
+        "side": "BUY",
+        "quantity": 10,
+        "stop_loss": "2800.00",
+        "take_profit": "3300.00",
+    }
+    buy_res = local_client.post("/api/orders", json=order_req)
+    assert buy_res.status_code == 200
+
+    poll_results = []
+    for _ in range(5):
+        port_res = local_client.get("/api/portfolios/INR")
+        assert port_res.status_code == 200
+        port_data = port_res.json()
+
+        pos_res = local_client.get("/api/positions")
+        assert pos_res.status_code == 200
+        pos_data = pos_res.json()
+
+        pnl_res = local_client.get("/api/pnl")
+        assert pnl_res.status_code == 200
+        pnl_data = pnl_res.json()
+
+        assert len(pos_data["positions"]) == 1
+        pos_item = pos_data["positions"][0]
+        assert pos_item["stop_loss"] is not None
+        assert pos_item["take_profit"] is not None
+
+        poll_results.append({
+            "mark_price": pos_item["mark_price"],
+            "market_value": pos_item["market_value"],
+            "unrealized_pnl": pos_item["unrealized_pnl"],
+            "holdings_value": port_data["holdings_value"],
+            "pnl_unrealized": pnl_data["inr"]["unrealized_pnl"],
+        })
+
+    first = poll_results[0]
+    for r in poll_results[1:]:
+        assert r["mark_price"] == first["mark_price"]
+        assert r["market_value"] == first["market_value"]
+        assert r["unrealized_pnl"] == first["unrealized_pnl"]
+        assert r["holdings_value"] == first["holdings_value"]
+        assert r["pnl_unrealized"] == first["pnl_unrealized"]
+
+
+def test_close_position_executes_at_exact_displayed_mark_price(tmp_path: Path) -> None:
+    state = TradingLabState(stop_file=tmp_path / "stop.txt", db_path=tmp_path / "decisions.db")
+    app = create_app(state=state)
+    local_client = TestClient(app)
+
+    order_req = {
+        "run_id": "CLOSE-TEST-1",
+        "exchange": "NSE",
+        "symbol": "TCS",
+        "side": "BUY",
+        "quantity": 5,
+        "stop_loss": "3500.00",
+        "take_profit": "4200.00",
+    }
+    buy_res = local_client.post("/api/orders", json=order_req)
+    assert buy_res.status_code == 200
+
+    pos_res = local_client.get("/api/positions")
+    assert pos_res.status_code == 200
+    pos_data = pos_res.json()
+    assert len(pos_data["positions"]) == 1
+    disp_mark = Decimal(str(pos_data["positions"][0]["mark_price"]))
+
+    close_res = local_client.post(
+        "/api/positions/close",
+        json={"exchange": "NSE", "symbol": "TCS", "currency": "INR"},
+    )
+    assert close_res.status_code == 200
+    close_data = close_res.json()
+    assert close_data["status"] == "FILLED"
+    fill_price = Decimal(str(close_data["average_fill_price"]))
+    slippage = Decimal(str(close_data["slippage"]))
+    slippage_per_share = slippage / Decimal(str(close_data["filled_quantity"]))
+    assert fill_price == disp_mark - slippage_per_share
+
+    pnl_res = local_client.get("/api/pnl")
+    pnl_data = pnl_res.json()
+    assert len(pnl_data["closed_trades"]) == 1
+    assert pnl_data["closed_trades"][0]["exit_reason"] == "MANUAL_SELL"
+    assert Decimal(str(pnl_data["closed_trades"][0]["sold_at"])) == fill_price
+
+    pos_after = local_client.get("/api/positions").json()
+    assert len(pos_after["positions"]) == 0
+
+
+def test_dashboard_expectancy_risk_mapping_and_chart_collision_avoidance(client: TestClient) -> None:
+    res = client.get("/")
+    assert res.status_code == 200
+    html = res.text
+
+    assert "formatRiskReasons" in html
+    assert "POSITION_CONCENTRATION_EXCEEDED" in html
+    assert "20% max allocation per stock reached" in html
+    assert "data.expectancy ?? data.expectancy_per_trade" in html
+    assert "collidesWithPill" in html
+    assert "badgeY" in html
+    assert "padRight = 96" in html
+    assert "Stop Loss" in html
+    assert "Sell Target" in html
+
+
 def test_no_inline_comments_in_m12_code() -> None:
     import tokenize
 

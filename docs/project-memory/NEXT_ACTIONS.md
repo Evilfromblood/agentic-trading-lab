@@ -1,6 +1,6 @@
 # Next Actions
 
-Current priority: ADR-043 (Unique Per-Symbol Pricing, Dynamic Gain/Loss Scorecard, Closed Trades History, Practice Scenarios & Beginner Workstation UX) is complete and verified. All milestones (M2a through M12, RC1, RC2, ADR-037 through ADR-043) are implemented, tested, and verified across Python 3.11 and Python 3.14. Tag `v1.4.0` ready.
+Current priority: ADR-044 (Mark-Price Consistency, Exact Close Execution & Chart Axis Collision Avoidance) is complete and verified. All milestones (M2a through M12, RC1, RC2, ADR-037 through ADR-044) are implemented, tested, and verified across Python 3.11 and Python 3.14. Tag `v1.4.1` ready.
 
 ## Immediate sequence
 1. Baseline M2a committed (`1b7e582`) and pushed to `origin/feature/reliable-foundation`.

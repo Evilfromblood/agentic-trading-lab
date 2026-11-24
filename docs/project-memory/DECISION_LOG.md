@@ -782,3 +782,26 @@ Append decisions; do not silently rewrite historical decisions. Mark superseded 
   5. **Adversarial Test Suite (`tests/test_m12_pnl_and_beginner_ux.py`):**
      - Added 8 comprehensive tests covering unique per-symbol pricing, price consistency across bar queries, scenario simulation and stop loss triggers, PnL scorecard accuracy, closed trades audit recording, dashboard UI components, and zero inline `#` comments.
 - **Consequences:** Transforms the platform into an intuitive, beginner-friendly trading workstation with realistic per-symbol pricing, transparent P&L tracking, safe market scenarios, and complete trade auditability.
+
+## ADR-044 (Mark-Price Consistency, Exact Close Execution & Chart Axis Collision Avoidance)
+- **Status:** Accepted (2026-11-24)
+- **Context:** Following ADR-043 user validation, several subtle runtime and visual issues were identified: (1) passive read polls (`GET /api/portfolios`, `GET /api/positions`, `GET /api/pnl`) caused subtle mark-price drift across successive polls due to unshared price lookups; (2) manual position closure executed against a newly fetched synthetic candle rather than the exact displayed mark price, causing minor tick slippage between the UI and fill prices; (3) the Backtest tab's Risk & Verification card rendered `Expectancy: undefined INR` when `data.expectancy_per_trade` was emitted inside nested metrics; (4) on the candlestick canvas chart, adjacent BUY/STOP price badges overlapped when trade plan levels were close, and colored pill badges drew directly over gray Y-axis grid tick labels; and (5) risk engine rejection reasons were rendered as raw uppercase codes rather than clear plain-English guidance.
+- **Decisions:**
+  1. **Deterministic Mark Price Consistency (`src/agentic_trading/api/state.py`):**
+     - Implemented `_get_or_fetch_mark_price(exchange, symbol, currency)` reading from `_mark_prices` cache first and falling back deterministically to the current `_sim_step` close without advancing `_sim_step`.
+     - Ensured `get_portfolio_summary`, `get_positions`, and `get_pnl_summary` all resolve from the identical cached mark price, guaranteeing mathematical equality between `quantity * mark_price == market_value` and `(mark_price - average_cost) * quantity == unrealized_pnl` to the exact cent across every table and card.
+  2. **Exact Sell Execution at Displayed Mark Price (`src/agentic_trading/api/state.py`):**
+     - Updated `close_position` to execute against the exact displayed `mark_price` stored in `self._mark_prices[(exchange, symbol)]`, locking in the displayed unrealized profit/loss (minus standard statutory slippage and fees).
+     - Explicitly cleared closed positions from `self._mark_prices` upon full liquidation.
+  3. **Backtest Expectancy Binding (`src/agentic_trading/api/dashboard.py`):**
+     - Safely bound the Backtest Expectancy metric to `Number(data.expectancy ?? data.expectancy_per_trade ?? data.metrics?.expectancy_per_trade ?? data.metrics?.expectancy ?? 0).toFixed(2) + " " + currency`, completely eliminating `undefined INR`.
+  4. **Right-Axis Pill Collision Avoidance & Grid De-cluttering (`src/agentic_trading/api/dashboard.py`):**
+     - Widened the candlestick chart right margin to `padRight = 96`.
+     - Pre-collected active AI level pills (`BUY`, `TARGET`, `STOP`), sorted them vertically by `rawY`, and enforced a minimum `18px` vertical spacing (`badgeY`), drawing a subtle dotted connector when badges are nudged.
+     - Skipped rendering gray horizontal grid tick price text whenever its Y coordinate lies within `18px` of an active AI pill badge, preventing badge/grid number collisions.
+  5. **Plain-English Risk Rejection Reasons & Position Brackets (`src/agentic_trading/api/{schemas,dashboard}.py`):**
+     - Added `stop_loss` and `take_profit` fields to `PositionItem` and displayed active brackets directly in the Open Portfolio Positions table.
+     - Created `formatRiskReason` and `formatRiskReasons` mapping risk rejection codes (`POSITION_CONCENTRATION_EXCEEDED`, `MAX_OPEN_POSITIONS_EXCEEDED`, `INSUFFICIENT_CASH`, `EVENT_BLACKOUT`, `KILL_SWITCH_ACTIVE`, etc.) into actionable plain-English explanations in Overview and AI Trade Plans views.
+  6. **Regression Test Verification (`tests/test_m12_pnl_and_beginner_ux.py`):**
+     - Added 3 comprehensive regression tests verifying passive poll consistency, exact close execution at displayed mark price minus slippage, and dashboard UI collision avoidance, risk explanations, and safe expectancy binding.
+- **Consequences:** Eliminates price drift between passive polls, aligns execution fills with displayed UI prices, prevents visual canvas label collisions, and provides beginner-friendly, plain-English risk guidance across the entire trading lab.

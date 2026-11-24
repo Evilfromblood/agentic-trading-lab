@@ -985,6 +985,29 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       return num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " " + currency;
     }
 
+    function formatRiskReason(code) {
+      if (!code) return "";
+      const map = {
+        "POSITION_CONCENTRATION_EXCEEDED": "20% max allocation per stock reached — sell existing shares or choose a new ticker",
+        "MAX_OPEN_POSITIONS_EXCEEDED": "Portfolio max position limit reached — close an active position before opening a new one",
+        "INSUFFICIENT_CASH": "Insufficient available cash to fulfill order sizing after statutory fee reserves",
+        "EVENT_BLACKOUT": "Corporate earnings/event blackout active within 2 days — trading suspended to protect capital",
+        "KILL_SWITCH_ACTIVE": "Emergency kill switch is active — all automated and manual trading halted",
+        "DAILY_LOSS_LIMIT_EXCEEDED": "Daily portfolio drawdown limit reached — risk controls halted new entries",
+        "DRAWDOWN_LIMIT_EXCEEDED": "Peak drawdown threshold reached — capital preservation locks active",
+        "UNAUTHORIZED_SHORT": "Short selling is disabled on cash paper accounts",
+        "INSUFFICIENT_POSITION": "Cannot sell more shares than currently held in portfolio",
+        "INVALID_PRICE": "Order price deviates too far from market feed or tick grid",
+        "LIMIT_PRICE_UNMET": "Market price has not reached specified limit entry"
+      };
+      return map[code] || code;
+    }
+
+    function formatRiskReasons(reasons) {
+      if (!reasons || reasons.length === 0) return "";
+      return reasons.map(r => formatRiskReason(r)).join("; ");
+    }
+
     function showStatus(text, isError) {
       const el = document.getElementById("statusNotification");
       el.textContent = text;
@@ -1277,7 +1300,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         tdRat.style.fontSize = "0.76rem";
         tdRat.style.color = "var(--text-muted)";
         tdRat.style.maxWidth = "220px";
-        const ratText = p.rationale || (p.risk_reasons && p.risk_reasons.length > 0 ? p.risk_reasons.join("; ") : "No action suggested");
+        const ratText = p.rationale || (p.risk_reasons && p.risk_reasons.length > 0 ? formatRiskReasons(p.risk_reasons) : "No action suggested");
         tdRat.textContent = ratText;
         tr.appendChild(tdRat);
 
@@ -1380,7 +1403,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       const padTop = 24;
       const padBottom = 28;
       const padLeft = 20;
-      const padRight = 110;
+      const padRight = 96;
       const plotWidth = width - padLeft - padRight;
       const plotHeight = height - padTop - padBottom;
 
@@ -1436,6 +1459,46 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         ctx.fillRect(padLeft, Math.min(yBuy, yStop), plotWidth, Math.abs(yBuy - yStop));
       }
 
+      const pills = [];
+      if (plan) {
+        if (plan.sell_target) {
+          pills.push({
+            type: "TARGET",
+            rawY: scaleY(Number(plan.sell_target)),
+            color: "#16a34a",
+            label: "TARGET: " + Number(plan.sell_target).toFixed(2)
+          });
+        }
+        if (plan.buy_price) {
+          pills.push({
+            type: "BUY",
+            rawY: scaleY(Number(plan.buy_price)),
+            color: "#0284c7",
+            label: "BUY: " + Number(plan.buy_price).toFixed(2)
+          });
+        }
+        if (plan.stop_loss) {
+          pills.push({
+            type: "STOP",
+            rawY: scaleY(Number(plan.stop_loss)),
+            color: "#dc2626",
+            label: "STOP: " + Number(plan.stop_loss).toFixed(2)
+          });
+        }
+      }
+      pills.sort((a, b) => a.rawY - b.rawY);
+      pills.forEach(p => { p.badgeY = p.rawY; });
+      for (let i = 1; i < pills.length; i++) {
+        if (pills[i].badgeY - pills[i - 1].badgeY < 18) {
+          pills[i].badgeY = pills[i - 1].badgeY + 18;
+        }
+      }
+      for (let i = pills.length - 2; i >= 0; i--) {
+        if (pills[i + 1].badgeY - pills[i].badgeY < 18) {
+          pills[i].badgeY = pills[i + 1].badgeY - 18;
+        }
+      }
+
       ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
       ctx.lineWidth = 1;
       ctx.fillStyle = "#64748b";
@@ -1451,7 +1514,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         ctx.moveTo(padLeft, y);
         ctx.lineTo(padLeft + plotWidth, y);
         ctx.stroke();
-        ctx.fillText(val.toFixed(2), padLeft + plotWidth + 8, y);
+
+        const collidesWithPill = pills.some(p => Math.abs(p.badgeY - y) < 18);
+        if (!collidesWithPill) {
+          ctx.fillText(val.toFixed(2), padLeft + plotWidth + 8, y);
+        }
       }
 
       const barSlot = plotWidth / bars.length;
@@ -1485,10 +1552,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         ctx.fillRect(x - candleWidth / 2, bodyTop, candleWidth, bodyHeight);
       });
 
-      if (plan) {
+      if (pills.length > 0) {
         ctx.lineWidth = 1.5;
         ctx.font = "bold 9px monospace";
-        ctx.setLineDash([4, 4]);
 
         function drawBadgePill(label, y, bgColor) {
           ctx.save();
@@ -1516,35 +1582,25 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           ctx.restore();
         }
 
-        if (plan.sell_target) {
-          const y = scaleY(Number(plan.sell_target));
-          ctx.strokeStyle = "#16a34a";
+        pills.forEach(p => {
+          ctx.strokeStyle = p.color;
+          ctx.setLineDash([4, 4]);
           ctx.beginPath();
-          ctx.moveTo(padLeft, y);
-          ctx.lineTo(padLeft + plotWidth, y);
+          ctx.moveTo(padLeft, p.rawY);
+          ctx.lineTo(padLeft + plotWidth, p.rawY);
           ctx.stroke();
-          drawBadgePill("TARGET: " + Number(plan.sell_target).toFixed(2), y, "#16a34a");
-        }
 
-        if (plan.buy_price) {
-          const y = scaleY(Number(plan.buy_price));
-          ctx.strokeStyle = "#0284c7";
-          ctx.beginPath();
-          ctx.moveTo(padLeft, y);
-          ctx.lineTo(padLeft + plotWidth, y);
-          ctx.stroke();
-          drawBadgePill("BUY: " + Number(plan.buy_price).toFixed(2), y, "#0284c7");
-        }
+          if (Math.abs(p.badgeY - p.rawY) > 2) {
+            ctx.strokeStyle = p.color;
+            ctx.setLineDash([2, 2]);
+            ctx.beginPath();
+            ctx.moveTo(padLeft + plotWidth, p.rawY);
+            ctx.lineTo(padLeft + plotWidth + 4, p.badgeY);
+            ctx.stroke();
+          }
 
-        if (plan.stop_loss) {
-          const y = scaleY(Number(plan.stop_loss));
-          ctx.strokeStyle = "#dc2626";
-          ctx.beginPath();
-          ctx.moveTo(padLeft, y);
-          ctx.lineTo(padLeft + plotWidth, y);
-          ctx.stroke();
-          drawBadgePill("STOP: " + Number(plan.stop_loss).toFixed(2), y, "#dc2626");
-        }
+          drawBadgePill(p.label, p.badgeY, p.color);
+        });
 
         ctx.setLineDash([]);
       }
@@ -1619,7 +1675,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         detail.rejected_proposals.forEach(rej => {
           const pill = document.createElement("span");
           pill.className = "pill pill-danger";
-          const reasons = (rej.reasons || []).join(", ");
+          const reasons = formatRiskReasons(rej.reasons || []);
           pill.textContent = (rej.proposal_id || "Proposal") + (reasons ? ": " + reasons : "");
           rejectionsContainer.appendChild(pill);
         });
@@ -1988,7 +2044,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         table.className = "plans-table";
         const thead = document.createElement("thead");
         const trHead = document.createElement("tr");
-        ["Symbol", "Exchange", "Currency", "Quantity", "Avg Cost", "Mark Price", "Market Value", "Unrealized P&L", "Action"].forEach(h => {
+        ["Symbol", "Exchange", "Currency", "Quantity", "Avg Cost", "Mark Price", "Stop Loss", "Sell Target", "Market Value", "Unrealized P&L", "Action"].forEach(h => {
           const th = document.createElement("th");
           th.textContent = h;
           trHead.appendChild(th);
@@ -2024,6 +2080,16 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           const tdMark = document.createElement("td");
           tdMark.textContent = Number(pos.mark_price).toFixed(2);
           tr.appendChild(tdMark);
+
+          const tdStop = document.createElement("td");
+          tdStop.className = "price-stop";
+          tdStop.textContent = pos.stop_loss ? Number(pos.stop_loss).toFixed(2) : "—";
+          tr.appendChild(tdStop);
+
+          const tdTarget = document.createElement("td");
+          tdTarget.className = "price-target";
+          tdTarget.textContent = pos.take_profit ? Number(pos.take_profit).toFixed(2) : "—";
+          tr.appendChild(tdTarget);
 
           const tdVal = document.createElement("td");
           tdVal.textContent = Number(pos.market_value).toFixed(2);
@@ -2356,7 +2422,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         document.getElementById("backtestTradesCount").textContent = String(data.metrics.total_trades);
         document.getElementById("backtestVar").textContent = data.monte_carlo.max_drawdown_pct_p95 + "%";
         document.getElementById("backtestProfitFactor").textContent = String(data.metrics.profit_factor);
-        document.getElementById("backtestExpectancy").textContent = formatMoney(data.metrics.expectancy, currency);
+        const expVal = Number(data.expectancy ?? data.expectancy_per_trade ?? data.metrics?.expectancy_per_trade ?? data.metrics?.expectancy ?? 0);
+        document.getElementById("backtestExpectancy").textContent = (isNaN(expVal) ? "0.00" : expVal.toFixed(2)) + " " + currency;
         document.getElementById("backtestBars").textContent = String(data.bars_evaluated);
 
         renderEquityCurve(data.equity_curve, data.metrics);
