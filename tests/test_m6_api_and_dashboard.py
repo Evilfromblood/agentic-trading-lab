@@ -101,6 +101,7 @@ def test_inr_and_usd_portfolio_isolation(tmp_path: Path) -> None:
         )
         assert neg_price_resp.status_code == 422
 
+        feed_rel = state.feed_bridge.fetch_candles("NSE", "RELIANCE", bars_count=1).candles[-1].close
         order_resp = client.post(
             "/api/orders",
             json={
@@ -109,8 +110,8 @@ def test_inr_and_usd_portfolio_isolation(tmp_path: Path) -> None:
                 "symbol": "RELIANCE",
                 "side": "BUY",
                 "quantity": 10,
-                "quote_price": "100.00",
-                "stop_loss": "95.00",
+                "quote_price": str(feed_rel),
+                "stop_loss": str((feed_rel * Decimal("0.95")).quantize(Decimal("0.05"))),
                 "client_order_id": "cid-inr-isolated",
             },
         )
@@ -128,14 +129,15 @@ def test_idempotent_order_submission_limit_pending_and_cancel(tmp_path: Path) ->
     )
     app = create_app(state=state)
     with TestClient(app) as client:
+        feed_tcs = state.feed_bridge.fetch_candles("NSE", "TCS", bars_count=1).candles[-1].close
         order_payload = {
             "run_id": "idempotent-run",
             "exchange": "NSE",
             "symbol": "TCS",
             "side": "BUY",
             "quantity": 5,
-            "quote_price": "100.00",
-            "stop_loss": "95.00",
+            "quote_price": str(feed_tcs),
+            "stop_loss": str((feed_tcs * Decimal("0.95")).quantize(Decimal("0.05"))),
             "client_order_id": "cid-idempotent-1",
         }
         res1 = client.post("/api/orders", json=order_payload)
@@ -150,15 +152,16 @@ def test_idempotent_order_submission_limit_pending_and_cancel(tmp_path: Path) ->
         assert data2["client_order_id"] == data1["client_order_id"]
         assert data2["filled_quantity"] == data1["filled_quantity"]
 
+        feed_infy = state.feed_bridge.fetch_candles("NSE", "INFY", bars_count=1).candles[-1].close
         limit_payload = {
             "run_id": "pending-run",
             "exchange": "NSE",
             "symbol": "INFY",
             "side": "BUY",
             "quantity": 10,
-            "quote_price": "100.00",
-            "limit_price": "90.00",
-            "stop_loss": "85.00",
+            "quote_price": str(feed_infy),
+            "limit_price": str((feed_infy * Decimal("0.90")).quantize(Decimal("0.05"))),
+            "stop_loss": str((feed_infy * Decimal("0.85")).quantize(Decimal("0.05"))),
             "client_order_id": "cid-pending-1",
         }
         res3 = client.post("/api/orders", json=limit_payload)
@@ -226,6 +229,7 @@ def test_kill_switch_activation_blocks_orders_and_desk(tmp_path: Path) -> None:
         assert clear_res.status_code == 200
         assert clear_res.json()["active"] is False
 
+        feed_tcs = state.feed_bridge.fetch_candles("NSE", "TCS", bars_count=1).candles[-1].close
         order_ok = client.post(
             "/api/orders",
             json={
@@ -234,8 +238,8 @@ def test_kill_switch_activation_blocks_orders_and_desk(tmp_path: Path) -> None:
                 "symbol": "TCS",
                 "side": "BUY",
                 "quantity": 5,
-                "quote_price": "100.00",
-                "stop_loss": "95.00",
+                "quote_price": str(feed_tcs),
+                "stop_loss": str((feed_tcs * Decimal("0.95")).quantize(Decimal("0.05"))),
             },
         )
         assert order_ok.status_code == 200
@@ -346,6 +350,7 @@ def test_dns_rebinding_and_cross_origin_state_mutation_blocked(tmp_path: Path) -
         valid_ipv6_resp = client.get("/api/health", headers={"host": "[::1]:8000"})
         assert valid_ipv6_resp.status_code == 200
 
+        feed_tcs = state.feed_bridge.fetch_candles("NSE", "TCS", bars_count=1).candles[-1].close
         valid_origin_resp = client.post(
             "/api/orders",
             headers={"origin": "http://localhost:8000"},
@@ -355,8 +360,8 @@ def test_dns_rebinding_and_cross_origin_state_mutation_blocked(tmp_path: Path) -
                 "symbol": "TCS",
                 "side": "BUY",
                 "quantity": 1,
-                "quote_price": "100.00",
-                "stop_loss": "95.00",
+                "quote_price": str(feed_tcs),
+                "stop_loss": str((feed_tcs * Decimal("0.95")).quantize(Decimal("0.05"))),
             },
         )
         assert valid_origin_resp.status_code == 200
@@ -506,6 +511,8 @@ def test_concurrent_state_and_portfolio_conservation(tmp_path: Path) -> None:
         initial_usd_deposit=Decimal("50000"),
     )
     app = create_app(state=state)
+    feed_rel = state.feed_bridge.fetch_candles("NSE", "RELIANCE", bars_count=1).candles[-1].close
+    feed_aapl = state.feed_bridge.fetch_candles("NASDAQ", "AAPL", bars_count=1).candles[-1].close
 
     def submit_inr(i: int) -> int:
         with TestClient(app) as client:
@@ -517,8 +524,8 @@ def test_concurrent_state_and_portfolio_conservation(tmp_path: Path) -> None:
                     "symbol": "RELIANCE",
                     "side": "BUY",
                     "quantity": 2,
-                    "quote_price": "100.00",
-                    "stop_loss": "95.00",
+                    "quote_price": str(feed_rel),
+                    "stop_loss": str((feed_rel * Decimal("0.95")).quantize(Decimal("0.05"))),
                     "client_order_id": f"conc-inr-cid-{i}",
                 },
             )
@@ -534,8 +541,8 @@ def test_concurrent_state_and_portfolio_conservation(tmp_path: Path) -> None:
                     "symbol": "AAPL",
                     "side": "BUY",
                     "quantity": 1,
-                    "quote_price": "100.00",
-                    "stop_loss": "95.00",
+                    "quote_price": str(feed_aapl),
+                    "stop_loss": str((feed_aapl * Decimal("0.95")).quantize(Decimal("0.05"))),
                     "client_order_id": f"conc-usd-cid-{i}",
                 },
             )

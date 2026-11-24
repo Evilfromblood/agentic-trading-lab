@@ -757,3 +757,28 @@ Append decisions; do not silently rewrite historical decisions. Mark superseded 
   5. **Adversarial Test Suite (`tests/test_m11_basket_backtest_and_journal.py`):**
      - Added 8 tests covering direct basket engine simulation, standalone walk-forward optimization, REST API endpoint validation, concentration cap enforcement, JSON and CSV journal export, CSV formula injection defense, dashboard UI elements, and zero inline `#` comments.
 - **Consequences:** Enables portfolio-level multi-asset backtesting and walk-forward parameter robustness validation while providing audit-ready, formula-injection-safe trade journal exports.
+
+## ADR-043 (Per-Symbol Market Data, Dynamic Gain/Loss Scorecard, Closed Trades History & Beginner-Guided UX)
+- **Status:** Accepted (2026-11-24)
+- **Context:** While previous milestones introduced local backtesting, automated desks, and basket optimization, user testing revealed several UX and realism friction points: (1) synthetic prices for all symbols shared identical wave parameters, making diverse symbols appear at the same price; (2) user portfolios lacked an intuitive Gain/Loss scorecard displaying net returns, win rates, and fee impacts in plain English; (3) closed trades were overwritten in the UI without a permanent audit log of realized P&L and holding periods; (4) beginners lacked guided practice scenarios (e.g. simulated Bull Rally, Sudden Crash, or Sideways Chop) to test stop losses and risk gates without waiting for real market movements; and (5) candlestick chart overlay badges occasionally collided with Y-axis price labels.
+- **Decisions:**
+  1. **Deterministic Unique Per-Symbol Pricing (`src/agentic_trading/market_data/feed_bridge.py`):**
+     - Established `_KNOWN_BASE_PRICES` dictionary anchoring realistic baseline prices for Indian and US tickers (`RELIANCE`: 2940, `TCS`: 3860, `INFY`: 1840, `HDFCBANK`: 1720, `ICICIBANK`: 1290, `SBIN`: 830, `AAPL`: 228, `MSFT`: 425, `NVDA`: 138, `GOOGL`: 176, `AMZN`: 205, with SHA-256 fallback between 150 and 2500).
+     - Anchored wave time index to historical offset days (`t = 120 - offset_days + sim_step`) ensuring single-bar queries ($offset\_days=0$) evaluate to the exact same wave point as the latest bar of multi-candle queries.
+     - Implemented deterministic scenario biases (`normal`, `bull_rally`, `sudden_crash`, `sideways_chop`) allowing market trajectory simulations.
+  2. **Practice Scenario Simulator (`src/agentic_trading/api/{schemas,state,routes}.py`):**
+     - Added `POST /api/sandbox/scenario` endpoint accepting `ScenarioRequest` with `scenario: Literal["bull_rally", "sudden_crash", "sideways_chop"]`.
+     - Implemented `TradingLabState.apply_scenario` which advances simulation steps, updates mark prices, and triggers `sweep_positions` to automatically execute stop loss and take profit orders.
+  3. **Dynamic Gain/Loss Scorecard & Closed Trades Audit (`src/agentic_trading/api/{schemas,state,routes}.py`):**
+     - Added `GET /api/pnl` endpoint returning `PnlSummaryResponse` with exact starting capital, total equity, net P&L, realized gains/losses, unrealized gains/losses, total fees paid, win rate, best/worst trade return, and closed trade audit trail.
+     - Recorded closed positions with explicit exit reasons (`MANUAL_SELL`, `STOP_LOSS_TRIGGERED`, `TAKE_PROFIT_TRIGGERED`) and preserved cost-basis conservation ($residual == Decimal("0")$).
+  4. **Beginner Workstation UX & Clean Chart Overlays (`src/agentic_trading/api/dashboard.py`):**
+     - Added collapsible Quick-Start Guide banner (`#beginnerGuideBanner`) with 3-step walk-through.
+     - Added dual-currency Gain/Loss scorecard cards (`#inrPnlCard`, `#usdPnlCard`) with color-coded profit/loss indicators.
+     - Added Watchlist Presets (`Nifty Safe`, `IT Movers`, `US Leaders`) and Practice Scenario buttons.
+     - Added Closed Trades History table in the Positions pane (`#closedTradesContainer`).
+     - Enhanced candlestick chart overlays with solid dark-bordered badge pills (`#0284c7` for BUY, `#16a34a` for TARGET, `#dc2626` for STOP) preventing text collision with grid lines.
+     - Maintained zero external CDN links and safe DOM manipulation via `document.createElement`.
+  5. **Adversarial Test Suite (`tests/test_m12_pnl_and_beginner_ux.py`):**
+     - Added 8 comprehensive tests covering unique per-symbol pricing, price consistency across bar queries, scenario simulation and stop loss triggers, PnL scorecard accuracy, closed trades audit recording, dashboard UI components, and zero inline `#` comments.
+- **Consequences:** Transforms the platform into an intuitive, beginner-friendly trading workstation with realistic per-symbol pricing, transparent P&L tracking, safe market scenarios, and complete trade auditability.

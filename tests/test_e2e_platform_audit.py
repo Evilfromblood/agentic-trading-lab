@@ -220,6 +220,11 @@ def test_manual_order_risk_gate_and_price_deviation(tmp_path: Path) -> None:
     )
     app = create_app(state=state)
     with TestClient(app) as client:
+        feed_p = state.feed_bridge.fetch_candles(Exchange.NSE, "RELIANCE", bars_count=1).candles[-1].close
+        feed_p_str = str(feed_p)
+        sl_str = str((feed_p * Decimal("0.95")).quantize(Decimal("0.05")))
+        bad_p_str = str((feed_p * Decimal("1.50")).quantize(Decimal("0.05")))
+
         res_no_stop = client.post(
             "/api/orders",
             json={
@@ -228,7 +233,7 @@ def test_manual_order_risk_gate_and_price_deviation(tmp_path: Path) -> None:
                 "symbol": "RELIANCE",
                 "side": "BUY",
                 "quantity": 10,
-                "quote_price": "100.00",
+                "quote_price": feed_p_str,
             },
         )
         assert res_no_stop.status_code == 422
@@ -242,8 +247,8 @@ def test_manual_order_risk_gate_and_price_deviation(tmp_path: Path) -> None:
                 "symbol": "RELIANCE",
                 "side": "BUY",
                 "quantity": 10,
-                "quote_price": "200.00",
-                "stop_loss": "95.00",
+                "quote_price": bad_p_str,
+                "stop_loss": sl_str,
             },
         )
         assert res_bad_price.status_code == 400
@@ -257,8 +262,8 @@ def test_manual_order_risk_gate_and_price_deviation(tmp_path: Path) -> None:
                 "symbol": "RELIANCE",
                 "side": "BUY",
                 "quantity": 10,
-                "quote_price": "100.00",
-                "stop_loss": "95.00",
+                "quote_price": feed_p_str,
+                "stop_loss": sl_str,
             },
         )
         assert res_ok.status_code == 200
@@ -368,6 +373,7 @@ def test_mark_to_market_holdings_and_conservation_residual(tmp_path: Path) -> No
     )
     app = create_app(state=state)
     with TestClient(app) as client:
+        feed_p = state.feed_bridge.fetch_candles(Exchange.NSE, "RELIANCE", bars_count=1).candles[-1].close
         order_res = client.post(
             "/api/orders",
             json={
@@ -376,19 +382,20 @@ def test_mark_to_market_holdings_and_conservation_residual(tmp_path: Path) -> No
                 "symbol": "RELIANCE",
                 "side": "BUY",
                 "quantity": 10,
-                "quote_price": "100.00",
-                "stop_loss": "95.00",
+                "quote_price": str(feed_p),
+                "stop_loss": str((feed_p * Decimal("0.95")).quantize(Decimal("0.05"))),
             },
         )
         assert order_res.status_code == 200
 
-        state._mark_prices[(Exchange.NSE, "RELIANCE")] = Money(Decimal("150.00"), Currency.INR)
+        new_mark = feed_p + Decimal("50.00")
+        state._mark_prices[(Exchange.NSE, "RELIANCE")] = Money(new_mark, Currency.INR)
 
         summary_res = client.get("/api/portfolios/INR")
         assert summary_res.status_code == 200
         data = summary_res.json()
         assert Decimal(str(data["unrealized_pnl"])) > Decimal("0")
-        assert Decimal(str(data["holdings_value"])) == Decimal("1500.00")
+        assert Decimal(str(data["holdings_value"])) == new_mark * Decimal("10")
         assert Decimal(str(data["conservation_residual"])) == Decimal("0")
         assert data["is_reconciled"] is True
 

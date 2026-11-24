@@ -1,6 +1,6 @@
 # Next Actions
 
-Current priority: ADR-042 (Multi-Symbol Basket Portfolio Backtester, Walk-Forward Parameter Optimizer & Trade Journal Export) is complete and verified. All milestones (M2a through M11, RC1, RC2, ADR-037 through ADR-042) are implemented, tested, and verified across Python 3.11 and Python 3.14. Tag `v1.3.0` ready.
+Current priority: ADR-043 (Unique Per-Symbol Pricing, Dynamic Gain/Loss Scorecard, Closed Trades History, Practice Scenarios & Beginner Workstation UX) is complete and verified. All milestones (M2a through M12, RC1, RC2, ADR-037 through ADR-043) are implemented, tested, and verified across Python 3.11 and Python 3.14. Tag `v1.4.0` ready.
 
 ## Immediate sequence
 1. Baseline M2a committed (`1b7e582`) and pushed to `origin/feature/reliable-foundation`.

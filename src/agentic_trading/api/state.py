@@ -29,6 +29,7 @@ from agentic_trading.api.schemas import (
     BasketBacktestRequest,
     BasketBacktestResponse,
     CandleBarItem,
+    ClosedTradeRecord,
     ClosePositionRequest,
     ContextResponse,
     CycleDetailResponse,
@@ -41,12 +42,16 @@ from agentic_trading.api.schemas import (
     NewsArticleItem,
     OrderResponse,
     PerSymbolAttributionItem,
+    PnlBreakdownItem,
+    PnlSummaryResponse,
     PortfolioSummaryResponse,
     PositionItem,
     PositionsListResponse,
     PositionSummary,
+    ScenarioResponse,
     ScheduledEventItem,
     SubmitOrderRequest,
+    SweepTriggerEvent,
     TradePlanItem,
     WalkForwardSummary,
 )
@@ -210,6 +215,10 @@ class TradingLabState:
             min_reward_to_risk=Decimal("1.5"),
         )
         self.backtest_engine = BacktestEngine()
+        self._sim_step: int = 0
+        self._scenario_bias: Literal["normal", "bull_rally", "sudden_crash", "sideways_chop"] = "normal"
+        self._closed_trades: list[dict[str, Any]] = []
+        self._position_brackets: dict[tuple[Exchange, str], dict[str, Money | None]] = {}
 
     def get_broker(self, currency_str: str) -> PaperBroker:
         curr = currency_str.strip().upper()
@@ -334,6 +343,8 @@ class TradingLabState:
             interval=CandleInterval.D1,
             bars_count=1,
             mode="synthetic",
+            sim_step=self._sim_step,
+            scenario_bias=self._scenario_bias,
         )
         feed_price = feed_res.candles[-1].close
 
@@ -431,6 +442,37 @@ class TradingLabState:
                 client_order_id=request.client_order_id,
                 tick_size=instrument.tick_size,
             )
+
+            if order.status.value == "FILLED" and order.side == "BUY":
+                self._position_brackets[(order.exchange, order.symbol)] = {
+                    "stop_loss": order.stop_loss,
+                    "take_profit": order.take_profit,
+                }
+            elif order.status.value == "FILLED" and order.side == "SELL":
+                sold_price = order.average_fill_price.amount if order.average_fill_price else effective_price
+                prev_pos = current_snapshot.positions.get((order.exchange, order.symbol))
+                avg_cost = prev_pos.average_cost.amount if prev_pos else sold_price
+                gross_pnl = (sold_price - avg_cost) * Decimal(str(order.filled_quantity))
+                net_pnl = gross_pnl - order.fees.amount
+                pnl_pct = (
+                    ((sold_price - avg_cost) / avg_cost * Decimal("100")).quantize(Decimal("0.01"))
+                    if avg_cost > Decimal("0")
+                    else Decimal("0.00")
+                )
+                self._closed_trades.append({
+                    "symbol": order.symbol,
+                    "exchange": order.exchange.value,
+                    "currency": currency.value,
+                    "quantity": order.filled_quantity,
+                    "bought_at": avg_cost,
+                    "sold_at": sold_price,
+                    "net_pnl": net_pnl,
+                    "pnl_pct": pnl_pct,
+                    "exit_reason": "MANUAL_SELL",
+                    "closed_at": now.isoformat(),
+                })
+                if prev_pos and prev_pos.quantity - order.filled_quantity <= 0:
+                    self._position_brackets.pop((order.exchange, order.symbol), None)
 
         return OrderResponse(
             client_order_id=order.client_order_id,
@@ -580,6 +622,14 @@ class TradingLabState:
             for pt in result.equity_curve
         ]
 
+        total_pnl = sum((t.net_pnl.amount for t in result.trades), Decimal("0"))
+        exp_per_trade = (
+            (total_pnl / Decimal(len(result.trades))).quantize(Decimal("0.01"))
+            if result.trades
+            else Decimal("0.00")
+        )
+        bars_eval = len(fetch_res.candles)
+
         return BacktestResponse(
             manifest_id=result.manifest.manifest_id,
             manifest_sha256=result.manifest.manifest_sha256,
@@ -591,6 +641,15 @@ class TradingLabState:
             feed_source=fetch_res.source,
             strategy_name=request.strategy_name,
             equity_curve=equity_curve,
+            expectancy=exp_per_trade,
+            bars_evaluated=bars_eval,
+            total_return_pct=result.metrics.total_return_pct,
+            sharpe_ratio=result.metrics.sharpe_ratio,
+            max_drawdown_pct=result.metrics.max_drawdown_pct,
+            win_rate=result.metrics.win_rate_pct,
+            profit_factor=result.metrics.profit_factor,
+            total_trades=result.metrics.total_trades,
+            mc_var_95_pct=Decimal(str(monte_carlo_dict.get("max_drawdown_pct_p95", "0"))),
         )
 
     def run_basket_backtest(self, request: BasketBacktestRequest) -> BasketBacktestResponse:
@@ -775,6 +834,8 @@ class TradingLabState:
                 bars_count=25,
                 mode=request.feed_source,
                 as_of=as_of,
+                sim_step=self._sim_step,
+                scenario_bias=self._scenario_bias,
             )
             bars = list(fetch_res.candles)
             context = BarContext(
@@ -808,6 +869,16 @@ class TradingLabState:
             watchlist=watchlist_targets,
             auto_execute=request.auto_buy,
         )
+
+        with self._lock:
+            if request.feed_source == "synthetic":
+                self._sim_step += 1
+            for o in result.orders:
+                if o.status.value == "FILLED" and o.side == "BUY":
+                    self._position_brackets[(o.exchange, o.symbol)] = {
+                        "stop_loss": o.stop_loss,
+                        "take_profit": o.take_profit,
+                    }
 
         approved_orders = [
             {
@@ -1204,6 +1275,30 @@ class TradingLabState:
                 tick_size=instrument.tick_size,
             )
 
+            sold_price = order.average_fill_price.amount if order.average_fill_price else feed_price
+            avg_cost = pos.average_cost.amount
+            gross_pnl = (sold_price - avg_cost) * Decimal(str(qty_to_sell))
+            net_pnl = gross_pnl - order.fees.amount
+            pnl_pct = (
+                ((sold_price - avg_cost) / avg_cost * Decimal("100")).quantize(Decimal("0.01"))
+                if avg_cost > Decimal("0")
+                else Decimal("0.00")
+            )
+            self._closed_trades.append({
+                "symbol": symbol,
+                "exchange": exchange.value,
+                "currency": currency.value,
+                "quantity": qty_to_sell,
+                "bought_at": avg_cost,
+                "sold_at": sold_price,
+                "net_pnl": net_pnl,
+                "pnl_pct": pnl_pct,
+                "exit_reason": "MANUAL_SELL",
+                "closed_at": now.isoformat(),
+            })
+            if (exchange, symbol) in self._position_brackets and pos.quantity - qty_to_sell <= 0:
+                self._position_brackets.pop((exchange, symbol), None)
+
         return OrderResponse(
             client_order_id=order.client_order_id,
             run_id=order.run_id,
@@ -1260,6 +1355,10 @@ class TradingLabState:
             )
             self.usd_broker = PaperBroker(self.usd_portfolio, kill_switch=self.kill_switch)
             self._mark_prices.clear()
+            self._closed_trades.clear()
+            self._position_brackets.clear()
+            self._sim_step = 0
+            self._scenario_bias = "normal"
 
             return {
                 "status": "ok",
@@ -1381,6 +1480,271 @@ class TradingLabState:
                 )
 
             return "\r\n".join(csv_lines)
+
+    def sweep_positions(
+        self,
+        feed_source: Literal["synthetic", "cache", "delayed_feed"] = "synthetic",
+    ) -> list[dict[str, Any]]:
+        if self.kill_switch.is_active():
+            return []
+
+        triggered_events: list[dict[str, Any]] = []
+
+        with self._lock:
+            for broker in (self.inr_broker, self.usd_broker):
+                for (exchange, symbol), pos in list(broker.portfolio._positions.items()):
+                    if pos.quantity <= 0:
+                        continue
+
+                    currency = broker.portfolio.currency
+                    tick = Decimal("0.05") if currency == Currency.INR else Decimal("0.01")
+                    inst = Instrument(
+                        exchange=exchange,
+                        symbol=symbol,
+                        currency=currency,
+                        tick_size=tick,
+                        lot_size=1,
+                    )
+
+                    fetch_res = self.feed_bridge.fetch_candles(
+                        exchange=exchange,
+                        symbol=symbol,
+                        interval=CandleInterval.D1,
+                        bars_count=1,
+                        mode=feed_source,
+                        sim_step=self._sim_step,
+                        scenario_bias=self._scenario_bias,
+                    )
+                    if not fetch_res.candles:
+                        continue
+                    current_bar = fetch_res.candles[-1]
+                    current_price = current_bar.close
+                    self._mark_prices[(exchange, symbol)] = Money(current_price, currency)
+
+                    brackets = self._position_brackets.get((exchange, symbol), {})
+                    sl_obj = brackets.get("stop_loss")
+                    tp_obj = brackets.get("take_profit")
+
+                    avg_cost = pos.average_cost.amount
+                    sl_price = sl_obj.amount if sl_obj else (avg_cost * Decimal("0.96")).quantize(tick)
+                    tp_price = tp_obj.amount if tp_obj else (avg_cost * Decimal("1.08")).quantize(tick)
+
+                    is_stop_loss = current_price <= sl_price
+                    is_take_profit = current_price >= tp_price
+
+                    if not (is_stop_loss or is_take_profit):
+                        continue
+
+                    exit_reason = "STOP_LOSS_TRIGGERED" if is_stop_loss else "TAKE_PROFIT_TRIGGERED"
+                    trigger_price = sl_price if is_stop_loss else tp_price
+
+                    now = datetime.now(timezone.utc)
+                    if broker.portfolio.ledger.entries:
+                        last_ts = broker.portfolio.ledger.entries[-1].timestamp
+                        if now < last_ts:
+                            now = last_ts
+
+                    candle = Candle(
+                        symbol=symbol,
+                        exchange=exchange,
+                        interval=CandleInterval.M1,
+                        open=current_price,
+                        high=current_price,
+                        low=current_price,
+                        close=current_price,
+                        volume=100000,
+                        timestamp=now - timedelta(minutes=1),
+                        source="sweep_positions",
+                        retrieval_timestamp=now,
+                    )
+
+                    proposal = TradeProposal(
+                        proposal_id=f"sweep-{symbol}-{now.strftime('%H%M%S%f')}",
+                        strategy_id="position_sweeper",
+                        instrument=inst,
+                        timestamp=now,
+                        side="SELL",
+                        quantity=pos.quantity,
+                        order_type="MARKET",
+                    )
+
+                    order = broker.submit_order(
+                        run_id=f"sweep-{now.strftime('%Y%m%d%H%M%S')}",
+                        proposal=proposal,
+                        current_candle=candle,
+                        tick_size=inst.tick_size,
+                    )
+
+                    sold_price = order.average_fill_price.amount if order.average_fill_price else current_price
+                    gross_pnl = (sold_price - avg_cost) * Decimal(str(pos.quantity))
+                    net_pnl = gross_pnl - order.fees.amount
+                    pnl_pct = (
+                        ((sold_price - avg_cost) / avg_cost * Decimal("100")).quantize(Decimal("0.01"))
+                        if avg_cost > Decimal("0")
+                        else Decimal("0.00")
+                    )
+
+                    trade_record = {
+                        "symbol": symbol,
+                        "exchange": exchange.value,
+                        "currency": currency.value,
+                        "quantity": pos.quantity,
+                        "bought_at": avg_cost,
+                        "sold_at": sold_price,
+                        "net_pnl": net_pnl,
+                        "pnl_pct": pnl_pct,
+                        "exit_reason": exit_reason,
+                        "closed_at": now.isoformat(),
+                    }
+                    self._closed_trades.append(trade_record)
+                    self._position_brackets.pop((exchange, symbol), None)
+
+                    triggered_events.append({
+                        "symbol": symbol,
+                        "exchange": exchange.value,
+                        "currency": currency.value,
+                        "trigger_type": exit_reason,
+                        "trigger_price": trigger_price,
+                        "mark_price": current_price,
+                        "quantity": pos.quantity,
+                        "net_pnl": net_pnl,
+                        "client_order_id": order.client_order_id,
+                    })
+
+        return triggered_events
+
+    def apply_scenario(
+        self,
+        scenario: Literal["normal", "bull_rally", "sudden_crash", "sideways_chop"],
+    ) -> ScenarioResponse:
+        if self.kill_switch.is_active():
+            raise KillSwitchError(self.kill_switch.reason() or "Kill switch active")
+
+        with self._lock:
+            self._scenario_bias = scenario
+            self._sim_step += 1
+            events = self.sweep_positions(feed_source="synthetic")
+
+            msg = f"Scenario '{scenario}' applied at simulation step {self._sim_step}"
+            if events:
+                msg += f" with {len(events)} position protection triggers"
+
+            trigger_items = [
+                SweepTriggerEvent(
+                    symbol=e["symbol"],
+                    exchange=e["exchange"],
+                    currency=e["currency"],
+                    trigger_type=e["trigger_type"],
+                    trigger_price=e["trigger_price"],
+                    mark_price=e["mark_price"],
+                    quantity=e["quantity"],
+                    net_pnl=e["net_pnl"],
+                    client_order_id=e["client_order_id"],
+                )
+                for e in events
+            ]
+
+            return ScenarioResponse(
+                scenario=scenario,
+                sim_step=self._sim_step,
+                paper_only=True,
+                message=msg,
+                sweep_events=trigger_items,
+            )
+
+    def get_pnl_summary(self) -> PnlSummaryResponse:
+        with self._lock:
+            def _build_breakdown(
+                currency: Currency, broker: PaperBroker, initial_capital: Decimal
+            ) -> PnlBreakdownItem:
+                curr_str: Literal["INR", "USD"] = "INR" if currency == Currency.INR else "USD"
+                moment = datetime.now(timezone.utc)
+                marks: dict[tuple[Exchange, str], Money] = {}
+                for key, pos in broker.portfolio._positions.items():
+                    if pos.quantity != 0:
+                        marks[key] = self._mark_prices.get(key, pos.average_cost)
+                snap = broker.portfolio.snapshot(currency, marks, moment)
+                total_equity = snap.total_equity.amount
+                net_pnl = total_equity - initial_capital
+                net_ret_pct = (
+                    ((total_equity - initial_capital) / initial_capital * Decimal("100")).quantize(Decimal("0.01"))
+                    if initial_capital > Decimal("0")
+                    else Decimal("0.00")
+                )
+                realized_pnl = snap.realized_pnl.amount
+                total_fees = broker.portfolio.ledger.get_total_fees(currency).amount
+
+                curr_closed = [t for t in self._closed_trades if t["currency"] == curr_str]
+                closed_count = len(curr_closed)
+                realized_gains = sum((t["net_pnl"] for t in curr_closed if t["net_pnl"] > Decimal("0")), Decimal("0.00"))
+                realized_losses = sum((t["net_pnl"] for t in curr_closed if t["net_pnl"] < Decimal("0")), Decimal("0.00"))
+                win_count = sum(1 for t in curr_closed if t["net_pnl"] > Decimal("0"))
+                loss_count = sum(1 for t in curr_closed if t["net_pnl"] < Decimal("0"))
+                win_rate = (
+                    (Decimal(win_count) / Decimal(closed_count) * Decimal("100")).quantize(Decimal("0.01"))
+                    if closed_count > 0
+                    else Decimal("0.00")
+                )
+                best_pnl = max((t["net_pnl"] for t in curr_closed), default=Decimal("0.00"))
+                worst_pnl = min((t["net_pnl"] for t in curr_closed), default=Decimal("0.00"))
+
+                open_pnls: list[Decimal] = []
+                for (ex, sym), pos in broker.portfolio._positions.items():
+                    if pos.quantity != 0:
+                        mk = self._mark_prices.get((ex, sym), pos.average_cost).amount
+                        p_pnl = (mk - pos.average_cost.amount) * Decimal(str(pos.quantity))
+                        open_pnls.append(p_pnl)
+
+                unrealized_pnl = sum(open_pnls, Decimal("0.00"))
+                unrealized_gains = sum((p for p in open_pnls if p > Decimal("0")), Decimal("0.00"))
+                unrealized_losses = sum((p for p in open_pnls if p < Decimal("0")), Decimal("0.00"))
+
+                return PnlBreakdownItem(
+                    currency=curr_str,
+                    starting_capital=initial_capital,
+                    current_equity=total_equity,
+                    net_pnl=net_pnl,
+                    net_return_pct=net_ret_pct,
+                    realized_pnl=realized_pnl,
+                    realized_gains=realized_gains,
+                    realized_losses=realized_losses,
+                    unrealized_pnl=unrealized_pnl,
+                    unrealized_gains=unrealized_gains,
+                    unrealized_losses=unrealized_losses,
+                    total_fees=total_fees,
+                    closed_trades_count=closed_count,
+                    winning_trades=win_count,
+                    losing_trades=loss_count,
+                    win_rate_pct=win_rate,
+                    best_trade_pnl=best_pnl,
+                    worst_trade_pnl=worst_pnl,
+                )
+
+            inr_item = _build_breakdown(Currency.INR, self.inr_broker, self.initial_inr_deposit)
+            usd_item = _build_breakdown(Currency.USD, self.usd_broker, self.initial_usd_deposit)
+
+            closed_records = [
+                ClosedTradeRecord(
+                    symbol=t["symbol"],
+                    exchange=t["exchange"],
+                    currency=t["currency"],
+                    quantity=t["quantity"],
+                    bought_at=t["bought_at"],
+                    sold_at=t["sold_at"],
+                    net_pnl=t["net_pnl"],
+                    pnl_pct=t["pnl_pct"],
+                    exit_reason=t["exit_reason"],
+                    closed_at=t["closed_at"],
+                )
+                for t in reversed(self._closed_trades)
+            ]
+
+            return PnlSummaryResponse(
+                paper_only=True,
+                inr=inr_item,
+                usd=usd_item,
+                closed_trades=closed_records,
+            )
 
     def close(self) -> None:
         pass

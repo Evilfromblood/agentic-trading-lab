@@ -1,7 +1,9 @@
 """Read-only delayed market data feed bridge, quality gate, and HMAC replay fixture cache."""
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import os
 import re
 import secrets
@@ -34,6 +36,19 @@ _ALLOWED_FEED_HOSTS = {
     "query2.finance.yahoo.com",
 }
 _SAFE_SYMBOL_REGEX = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
+_KNOWN_BASE_PRICES: dict[str, Decimal] = {
+    "RELIANCE": Decimal("2940.00"),
+    "TCS": Decimal("3860.00"),
+    "INFY": Decimal("1840.00"),
+    "HDFCBANK": Decimal("1720.00"),
+    "ICICIBANK": Decimal("1290.00"),
+    "SBIN": Decimal("830.00"),
+    "AAPL": Decimal("228.00"),
+    "MSFT": Decimal("425.00"),
+    "NVDA": Decimal("138.00"),
+    "GOOGL": Decimal("176.00"),
+    "AMZN": Decimal("205.00"),
+}
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -358,8 +373,10 @@ class ReadOnlyMarketFeedBridge:
         exchange: Exchange,
         symbol: str,
         interval: CandleInterval = CandleInterval.D1,
-        bars_count: int = 30,
+        bars_count: int = 120,
         as_of: datetime | None = None,
+        sim_step: int = 0,
+        scenario_bias: Literal["normal", "bull_rally", "sudden_crash", "sideways_chop"] = "normal",
     ) -> tuple[Candle, ...]:
         clean_symbol = self.validate_symbol(symbol)
         tz = get_exchange_timezone(exchange)
@@ -367,17 +384,46 @@ class ReadOnlyMarketFeedBridge:
         local_moment = moment.astimezone(tz)
         base_date = local_moment.replace(hour=9, minute=15, second=0, microsecond=0)
 
+        ex_enum = Exchange(exchange) if isinstance(exchange, str) else exchange
+        digest = hashlib.sha256(f"{ex_enum.value}:{clean_symbol}".encode("utf-8")).digest()
+        if clean_symbol in _KNOWN_BASE_PRICES:
+            base_price = _KNOWN_BASE_PRICES[clean_symbol]
+        else:
+            hash_int = int.from_bytes(digest[:4], "big")
+            base_price = Decimal(str(150 + (hash_int % 2351)))
+
+        seed_byte = digest[4]
+        phase = seed_byte % 17
+
         candles: list[Candle] = []
-        base_price = Decimal("100.00")
 
         for i in range(bars_count):
             offset_days = bars_count - 1 - i
             bar_ts = base_date - timedelta(days=offset_days)
-            wave = Decimal(str((i % 20) * 2 - (i % 7)))
-            c_close = base_price + wave
-            c_high = c_close + Decimal("3.00")
-            c_low = max(Decimal("1.00"), c_close - Decimal("2.00"))
-            c_open = max(Decimal("1.00"), c_close - Decimal("1.00"))
+            t = 120 - offset_days + sim_step
+
+            progress = max(Decimal("0.0"), Decimal("1.0") - (Decimal(str(offset_days)) / Decimal("120.0")))
+            trend = progress * Decimal("0.08") * base_price
+
+            w1 = Decimal(str(round(math.sin((t + phase) * 0.18), 4))) * Decimal("0.03") * base_price
+            w2 = Decimal(str(round(math.cos((t * 2 + phase) * 0.09), 4))) * Decimal("0.02") * base_price
+            wave = w1 + w2
+
+            scenario_mult = Decimal("1.00")
+            if scenario_bias == "bull_rally":
+                scenario_mult = Decimal("1.00") + (progress * Decimal("0.08"))
+            elif scenario_bias == "sudden_crash":
+                scenario_mult = Decimal("1.00") - (progress * Decimal("0.08"))
+            elif scenario_bias == "sideways_chop":
+                wave = wave * Decimal("0.25")
+
+            c_close = max(Decimal("1.00"), (base_price + trend + wave) * scenario_mult).quantize(Decimal("0.01"))
+            spread = max(Decimal("0.20"), (c_close * Decimal("0.008")).quantize(Decimal("0.01")))
+            open_shift = (Decimal(str(((t + phase) % 7) - 3)) * Decimal("0.20") * spread).quantize(Decimal("0.01"))
+            c_open = max(Decimal("0.50"), c_close + open_shift)
+            c_high = max(c_open, c_close) + spread
+            c_low = max(Decimal("0.10"), min(c_open, c_close) - spread)
+            vol = 40000 + ((t * 1337 + seed_byte) % 80000)
             ret_ts = bar_ts + timedelta(hours=6, minutes=15)
 
             candles.append(
@@ -389,7 +435,7 @@ class ReadOnlyMarketFeedBridge:
                     high=c_high,
                     low=c_low,
                     close=c_close,
-                    volume=50000 + (i % 10) * 1000,
+                    volume=vol,
                     timestamp=bar_ts,
                     source="synthetic",
                     retrieval_timestamp=ret_ts,
@@ -403,9 +449,11 @@ class ReadOnlyMarketFeedBridge:
         exchange: Exchange,
         symbol: str,
         interval: CandleInterval = CandleInterval.D1,
-        bars_count: int = 30,
+        bars_count: int = 120,
         mode: Literal["synthetic", "cache", "delayed_feed"] = "synthetic",
         as_of: datetime | None = None,
+        sim_step: int = 0,
+        scenario_bias: Literal["normal", "bull_rally", "sudden_crash", "sideways_chop"] = "normal",
     ) -> FeedFetchResult:
         clean_symbol = self.validate_symbol(symbol)
 
@@ -416,6 +464,8 @@ class ReadOnlyMarketFeedBridge:
                 interval=interval,
                 bars_count=bars_count,
                 as_of=as_of,
+                sim_step=sim_step,
+                scenario_bias=scenario_bias,
             )
             return FeedFetchResult(
                 exchange=exchange,
@@ -447,6 +497,8 @@ class ReadOnlyMarketFeedBridge:
                 interval=interval,
                 bars_count=bars_count,
                 as_of=as_of,
+                sim_step=sim_step,
+                scenario_bias=scenario_bias,
             )
             return FeedFetchResult(
                 exchange=exchange,
@@ -501,6 +553,8 @@ class ReadOnlyMarketFeedBridge:
             interval=interval,
             bars_count=bars_count,
             as_of=as_of,
+            sim_step=sim_step,
+            scenario_bias=scenario_bias,
         )
         return FeedFetchResult(
             exchange=exchange,

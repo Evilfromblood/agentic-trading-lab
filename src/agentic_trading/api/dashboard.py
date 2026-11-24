@@ -574,6 +574,31 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       </div>
     </header>
 
+    <div id="beginnerGuideBanner" class="card" style="margin-bottom:16px; border-color:var(--blue-border); background:rgba(14, 165, 233, 0.05);">
+      <div class="card-head" style="margin-bottom:8px;">
+        <div style="font-weight:700;font-size:0.92rem;color:var(--accent);">Beginner Guide · How to Use This Lab</div>
+        <button id="toggleGuideBtn" class="btn btn-ghost btn-sm" style="font-size:0.75rem;">Hide Guide ▴</button>
+      </div>
+      <div id="beginnerGuideContent" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; font-size:0.8rem; color:var(--text-muted); line-height:1.45;">
+        <div style="padding:10px; background:#080d1a; border-radius:6px; border:1px solid #1e293b;">
+          <strong style="color:#38bdf8; display:block; margin-bottom:4px;">1. Pick Market &amp; Watchlist</strong>
+          Select <strong>NSE (INR)</strong> or <strong>NASDAQ (USD)</strong>. Use presets like <em>Nifty Safe</em> or <em>US Leaders</em> to pick stocks.
+        </div>
+        <div style="padding:10px; background:#080d1a; border-radius:6px; border:1px solid #1e293b;">
+          <strong style="color:#38bdf8; display:block; margin-bottom:4px;">2. Toggle Auto-Buy</strong>
+          Keep <strong>Auto-Buy ON</strong> for automated paper execution on risk approval, or <strong>Auto-Buy OFF</strong> to preview trade plans.
+        </div>
+        <div style="padding:10px; background:#080d1a; border-radius:6px; border:1px solid #1e293b;">
+          <strong style="color:#38bdf8; display:block; margin-bottom:4px;">3. Click Run Desk</strong>
+          The 7 AI agents evaluate technicals, fundamentals, and catalysts to calculate Buy, Sell Target, and Stop-Loss brackets.
+        </div>
+        <div style="padding:10px; background:#080d1a; border-radius:6px; border:1px solid #1e293b;">
+          <strong style="color:#38bdf8; display:block; margin-bottom:4px;">4. Track Gains &amp; Test Scenarios</strong>
+          Monitor the <strong>Gain &amp; Loss Scorecard</strong> and test Stop-Loss protections using practice scenarios (<em>Sudden Crash</em>, <em>Bull Rally</em>).
+        </div>
+      </div>
+    </div>
+
     <div class="cycle-strip">
       <div class="cycle-strip-top">
         <div class="cycle-label">Reviewing Paper Trading Cycle</div>
@@ -624,6 +649,46 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       </div>
     </div>
 
+    <div class="portfolio-grid" id="pnlGrid">
+      <div class="card" id="inrPnlCard">
+        <div class="card-head">
+          <span class="card-title">INR Gain / Loss Scorecard</span>
+          <span class="card-tag" id="inrPnlWinRate">0% Win Rate</span>
+        </div>
+        <div class="equity-figure" id="inrNetPnl">—</div>
+        <div class="metric-row"><span class="metric-name">Locked-In Gains (Wins)</span><span class="metric-num" id="inrRealizedGains" style="color:var(--success);">—</span></div>
+        <div class="metric-row"><span class="metric-name">Locked-In Losses (Losses)</span><span class="metric-num" id="inrRealizedLosses" style="color:var(--danger);">—</span></div>
+        <div class="metric-row">
+          <div>
+            <span class="metric-name">Open Trade Gain / Loss</span>
+            <div style="font-size:0.7rem;color:var(--text-dim);">Open paper profit/loss before selling</div>
+          </div>
+          <span class="metric-num" id="inrUnrealizedPnl">—</span>
+        </div>
+        <div class="metric-row"><span class="metric-name">Win / Loss Record</span><span class="metric-num" id="inrWinLossRecord">—</span></div>
+        <div class="metric-row"><span class="metric-name">Total Fees</span><span class="metric-num" id="inrTotalFees">—</span></div>
+      </div>
+
+      <div class="card" id="usdPnlCard">
+        <div class="card-head">
+          <span class="card-title">USD Gain / Loss Scorecard</span>
+          <span class="card-tag" id="usdPnlWinRate">0% Win Rate</span>
+        </div>
+        <div class="equity-figure" id="usdNetPnl">—</div>
+        <div class="metric-row"><span class="metric-name">Locked-In Gains (Wins)</span><span class="metric-num" id="usdRealizedGains" style="color:var(--success);">—</span></div>
+        <div class="metric-row"><span class="metric-name">Locked-In Losses (Losses)</span><span class="metric-num" id="usdRealizedLosses" style="color:var(--danger);">—</span></div>
+        <div class="metric-row">
+          <div>
+            <span class="metric-name">Open Trade Gain / Loss</span>
+            <div style="font-size:0.7rem;color:var(--text-dim);">Open paper profit/loss before selling</div>
+          </div>
+          <span class="metric-num" id="usdUnrealizedPnl">—</span>
+        </div>
+        <div class="metric-row"><span class="metric-name">Win / Loss Record</span><span class="metric-num" id="usdWinLossRecord">—</span></div>
+        <div class="metric-row"><span class="metric-name">Total Fees</span><span class="metric-num" id="usdTotalFees">—</span></div>
+      </div>
+    </div>
+
     <div class="action-bar">
       <div class="action-buttons">
         <button id="runDeskBtn" class="btn btn-primary">Run Desk</button>
@@ -652,9 +717,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <option value="NASDAQ">NASDAQ · USD</option>
           </select>
         </div>
-        <div class="setting-group">
+        <div class="setting-group" style="min-width:260px;">
           <label for="watchlistInput">Watchlist:</label>
-          <input id="watchlistInput" type="text" value="RELIANCE, TCS" style="width:140px;">
+          <input id="watchlistInput" type="text" value="RELIANCE, TCS" style="width:100%;">
+          <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
+            <button id="presetNiftySafeBtn" class="btn btn-ghost btn-sm">Nifty Safe</button>
+            <button id="presetItMoversBtn" class="btn btn-ghost btn-sm">IT Movers</button>
+            <button id="presetUsLeadersBtn" class="btn btn-ghost btn-sm">US Leaders</button>
+          </div>
         </div>
         <div class="setting-group">
           <label for="feedSourceSelect">Feed Source:</label>
@@ -682,6 +752,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div class="setting-group">
           <label for="ollamaModelInput">Model:</label>
           <input id="ollamaModelInput" type="text" value="gemma4:12b" style="width:110px;">
+        </div>
+        <div class="setting-group" style="grid-column: 1 / -1; margin-top:6px; padding-top:8px; border-top:1px solid #1e293b;">
+          <label style="color:var(--accent);">Practice Scenarios (Test Stop-Loss &amp; Market Movements):</label>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:4px;">
+            <button id="scenarioBullBtn" class="btn btn-success-outline btn-sm">Bull Rally (+8%)</button>
+            <button id="scenarioCrashBtn" class="btn btn-danger-outline btn-sm">Sudden Crash (-8% · Test SL)</button>
+            <button id="scenarioChopBtn" class="btn btn-ghost btn-sm">Sideways Chop</button>
+            <button id="liveModeToggleBtn" class="btn btn-primary btn-sm" style="margin-left:auto;">Use Live Delayed Quotes &amp; News</button>
+          </div>
         </div>
       </div>
     </div>
@@ -780,6 +859,16 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           <div class="empty-placeholder">No open positions</div>
         </div>
       </div>
+
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-head">
+          <div class="section-title" style="margin-bottom:0;">Closed Trades History</div>
+          <span class="card-tag">Round-Trip Realized Performance</span>
+        </div>
+        <div id="closedTradesContainer" style="margin-top:10px;">
+          <div class="empty-placeholder">No closed trades recorded yet</div>
+        </div>
+      </div>
     </div>
 
     <div id="tabBacktestPane" class="tab-pane">
@@ -790,8 +879,20 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <span id="backtestStrategyBadge" class="pill pill-blue">—</span>
           </div>
           <div class="equity-figure" id="backtestNetReturn">—</div>
-          <div class="metric-row"><span class="metric-name">Sharpe Ratio</span><span class="metric-num" id="backtestSharpe">—</span></div>
-          <div class="metric-row"><span class="metric-name">Max Drawdown</span><span class="metric-num" id="backtestDrawdown">—</span></div>
+          <div class="metric-row">
+            <div>
+              <span class="metric-name">Sharpe Ratio</span>
+              <div style="font-size:0.7rem;color:var(--text-dim);">Risk-adjusted return (&gt;1.0 is strong)</div>
+            </div>
+            <span class="metric-num" id="backtestSharpe">—</span>
+          </div>
+          <div class="metric-row">
+            <div>
+              <span class="metric-name">Max Drawdown</span>
+              <div style="font-size:0.7rem;color:var(--text-dim);">Largest peak-to-trough drop</div>
+            </div>
+            <span class="metric-num" id="backtestDrawdown">—</span>
+          </div>
           <div class="metric-row"><span class="metric-name">Win Rate</span><span class="metric-num" id="backtestWinRate">—</span></div>
           <div class="metric-row"><span class="metric-name">Trades Count</span><span class="metric-num" id="backtestTradesCount">—</span></div>
         </div>
@@ -1386,43 +1487,63 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
       if (plan) {
         ctx.lineWidth = 1.5;
-        ctx.font = "bold 10px monospace";
+        ctx.font = "bold 9px monospace";
         ctx.setLineDash([4, 4]);
+
+        function drawBadgePill(label, y, bgColor) {
+          ctx.save();
+          ctx.font = "bold 9px monospace";
+          const tw = ctx.measureText(label).width;
+          const pw = tw + 10;
+          const ph = 16;
+          const px = padLeft + plotWidth + 4;
+          const py = y - ph / 2;
+          ctx.fillStyle = bgColor;
+          ctx.beginPath();
+          if (ctx.roundRect) {
+            ctx.roundRect(px, py, pw, ph, 3);
+          } else {
+            ctx.rect(px, py, pw, ph);
+          }
+          ctx.fill();
+          ctx.strokeStyle = "#0b1120";
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          ctx.fillStyle = "#ffffff";
+          ctx.textAlign = "left";
+          ctx.textBaseline = "middle";
+          ctx.fillText(label, px + 5, y);
+          ctx.restore();
+        }
 
         if (plan.sell_target) {
           const y = scaleY(Number(plan.sell_target));
-          ctx.strokeStyle = "#22c55e";
+          ctx.strokeStyle = "#16a34a";
           ctx.beginPath();
           ctx.moveTo(padLeft, y);
           ctx.lineTo(padLeft + plotWidth, y);
           ctx.stroke();
-          ctx.fillStyle = "#22c55e";
-          const label = "TARGET: " + Number(plan.sell_target).toFixed(2);
-          ctx.fillText(label, padLeft + plotWidth + 8, y);
+          drawBadgePill("TARGET: " + Number(plan.sell_target).toFixed(2), y, "#16a34a");
         }
 
         if (plan.buy_price) {
           const y = scaleY(Number(plan.buy_price));
-          ctx.strokeStyle = "#38bdf8";
+          ctx.strokeStyle = "#0284c7";
           ctx.beginPath();
           ctx.moveTo(padLeft, y);
           ctx.lineTo(padLeft + plotWidth, y);
           ctx.stroke();
-          ctx.fillStyle = "#38bdf8";
-          const label = "BUY: " + Number(plan.buy_price).toFixed(2);
-          ctx.fillText(label, padLeft + plotWidth + 8, y);
+          drawBadgePill("BUY: " + Number(plan.buy_price).toFixed(2), y, "#0284c7");
         }
 
         if (plan.stop_loss) {
           const y = scaleY(Number(plan.stop_loss));
-          ctx.strokeStyle = "#ef4444";
+          ctx.strokeStyle = "#dc2626";
           ctx.beginPath();
           ctx.moveTo(padLeft, y);
           ctx.lineTo(padLeft + plotWidth, y);
           ctx.stroke();
-          ctx.fillStyle = "#ef4444";
-          const label = "STOP: " + Number(plan.stop_loss).toFixed(2);
-          ctx.fillText(label, padLeft + plotWidth + 8, y);
+          drawBadgePill("STOP: " + Number(plan.stop_loss).toFixed(2), y, "#dc2626");
         }
 
         ctx.setLineDash([]);
@@ -1843,6 +1964,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     }
 
     async function loadPositions() {
+      await loadPnl();
       const container = document.getElementById("positionsContainer");
       try {
         const res = await fetch("/api/positions");
@@ -2096,6 +2218,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         if (eq > maxEq) maxEq = eq;
       });
 
+      if (maxEq - minEq < 1.0) {
+        minEq *= 0.99;
+        maxEq *= 1.01;
+      }
       const range = (maxEq - minEq) || 1.0;
       minEq -= range * 0.05;
       maxEq += range * 0.05;
@@ -2125,7 +2251,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         ctx.moveTo(padLeft, y);
         ctx.lineTo(padLeft + plotWidth, y);
         ctx.stroke();
-        ctx.fillText(Number(val).toFixed(0), padLeft - 8, y);
+        ctx.fillText(Number(val).toLocaleString("en-US", { maximumFractionDigits: 0 }), padLeft - 8, y);
       }
 
       const grad = ctx.createLinearGradient(0, padTop, 0, padTop + plotHeight);
@@ -2407,10 +2533,246 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       window.open("/api/journal/export?format=" + encodeURIComponent(fmt), "_blank");
     }
 
+    function toggleGuide() {
+      const el = document.getElementById("beginnerGuideContent");
+      const btn = document.getElementById("toggleGuideBtn");
+      if (!el || !btn) return;
+      if (el.style.display === "none") {
+        el.style.display = "grid";
+        btn.textContent = "Hide Guide ▴";
+      } else {
+        el.style.display = "none";
+        btn.textContent = "Show Guide ▾";
+      }
+    }
+
+    function selectPreset(preset) {
+      const mkt = document.getElementById("marketSelect");
+      const wl = document.getElementById("watchlistInput");
+      if (preset === "nifty_safe") {
+        mkt.value = "NSE";
+        wl.value = "RELIANCE, TCS, HDFCBANK, INFY";
+      } else if (preset === "it_movers") {
+        mkt.value = "NSE";
+        wl.value = "TCS, INFY";
+      } else if (preset === "us_leaders") {
+        mkt.value = "NASDAQ";
+        wl.value = "AAPL, MSFT, NVDA, GOOGL, AMZN";
+      }
+      showStatus("Applied watchlist preset: " + preset, false);
+    }
+
+    async function applyScenario(scenario) {
+      showStatus("Applying practice scenario: " + scenario + "...", false);
+      try {
+        const res = await fetch("/api/sandbox/scenario", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scenario: scenario })
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          showStatus("Scenario application failed: " + (err.detail || res.statusText), true);
+          return;
+        }
+        const data = await res.json();
+        showStatus("Scenario applied: " + data.scenario + " (" + data.message + ")", false);
+        await refreshAll();
+        await loadPositions();
+      } catch (err) {
+        showStatus("Scenario error: " + err, true);
+      }
+    }
+
+    function toggleLiveMode() {
+      const feedSel = document.getElementById("feedSourceSelect");
+      const ctxSel = document.getElementById("contextSourceSelect");
+      const btn = document.getElementById("liveModeToggleBtn");
+      if (feedSel.value === "synthetic") {
+        feedSel.value = "delayed_feed";
+        ctxSel.value = "live";
+        btn.textContent = "Switch to Synthetic Deterministic Mode";
+        btn.className = "btn btn-secondary btn-sm";
+        showStatus("Switched to Live Delayed Quotes & RSS Feeds", false);
+      } else {
+        feedSel.value = "synthetic";
+        ctxSel.value = "synthetic";
+        btn.textContent = "Use Live Delayed Quotes & News";
+        btn.className = "btn btn-primary btn-sm";
+        showStatus("Switched to Synthetic Deterministic Market Feeds", false);
+      }
+    }
+
+    function renderPnlScorecard(data) {
+      if (!data) return;
+      if (data.inr) {
+        const inr = data.inr;
+        const rateEl = document.getElementById("inrPnlWinRate");
+        const winRate = inr.win_rate_pct !== undefined ? inr.win_rate_pct : (inr.win_rate || "0");
+        if (rateEl) rateEl.textContent = winRate + "% Win Rate";
+        const netEl = document.getElementById("inrNetPnl");
+        if (netEl) {
+          const n = Number(inr.net_pnl);
+          netEl.textContent = (n >= 0 ? "+" : "") + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " INR";
+          netEl.style.color = n >= 0 ? "var(--success)" : "var(--danger)";
+        }
+        const rgEl = document.getElementById("inrRealizedGains");
+        if (rgEl) rgEl.textContent = "+" + Number(inr.realized_gains).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " INR";
+        const rlEl = document.getElementById("inrRealizedLosses");
+        if (rlEl) rlEl.textContent = "-" + Number(inr.realized_losses).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " INR";
+        const unEl = document.getElementById("inrUnrealizedPnl");
+        if (unEl) {
+          const u = Number(inr.unrealized_pnl);
+          unEl.textContent = (u >= 0 ? "+" : "") + u.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " INR";
+          unEl.style.color = u >= 0 ? "var(--success)" : "var(--danger)";
+        }
+        const recEl = document.getElementById("inrWinLossRecord");
+        const totalClosed = inr.closed_trades_count !== undefined ? inr.closed_trades_count : (inr.total_trades || 0);
+        if (recEl) recEl.textContent = inr.winning_trades + " Wins / " + inr.losing_trades + " Losses (" + totalClosed + " Closed)";
+        const feeEl = document.getElementById("inrTotalFees");
+        if (feeEl) feeEl.textContent = Number(inr.total_fees).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " INR";
+      }
+
+      if (data.usd) {
+        const usd = data.usd;
+        const rateEl = document.getElementById("usdPnlWinRate");
+        const winRate = usd.win_rate_pct !== undefined ? usd.win_rate_pct : (usd.win_rate || "0");
+        if (rateEl) rateEl.textContent = winRate + "% Win Rate";
+        const netEl = document.getElementById("usdNetPnl");
+        if (netEl) {
+          const n = Number(usd.net_pnl);
+          netEl.textContent = (n >= 0 ? "+" : "") + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " USD";
+          netEl.style.color = n >= 0 ? "var(--success)" : "var(--danger)";
+        }
+        const rgEl = document.getElementById("usdRealizedGains");
+        if (rgEl) rgEl.textContent = "+" + Number(usd.realized_gains).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " USD";
+        const rlEl = document.getElementById("usdRealizedLosses");
+        if (rlEl) rlEl.textContent = "-" + Number(usd.realized_losses).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " USD";
+        const unEl = document.getElementById("usdUnrealizedPnl");
+        if (unEl) {
+          const u = Number(usd.unrealized_pnl);
+          unEl.textContent = (u >= 0 ? "+" : "") + u.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " USD";
+          unEl.style.color = u >= 0 ? "var(--success)" : "var(--danger)";
+        }
+        const recEl = document.getElementById("usdWinLossRecord");
+        const totalClosed = usd.closed_trades_count !== undefined ? usd.closed_trades_count : (usd.total_trades || 0);
+        if (recEl) recEl.textContent = usd.winning_trades + " Wins / " + usd.losing_trades + " Losses (" + totalClosed + " Closed)";
+        const feeEl = document.getElementById("usdTotalFees");
+        if (feeEl) feeEl.textContent = Number(usd.total_fees).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " USD";
+      }
+    }
+
+    function renderClosedTrades(trades) {
+      const container = document.getElementById("closedTradesContainer");
+      if (!container) return;
+      while (container.firstChild) container.removeChild(container.firstChild);
+
+      if (!trades || trades.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty-placeholder";
+        empty.textContent = "No closed trades recorded yet";
+        container.appendChild(empty);
+        return;
+      }
+
+      const table = document.createElement("table");
+      table.className = "plans-table";
+      const thead = document.createElement("thead");
+      const trHead = document.createElement("tr");
+      ["Symbol", "Currency", "Qty", "Buy Price", "Exit Price", "Realized P&L", "Return %", "Exit Reason", "Closed At"].forEach(h => {
+        const th = document.createElement("th");
+        th.textContent = h;
+        trHead.appendChild(th);
+      });
+      thead.appendChild(trHead);
+      table.appendChild(thead);
+
+      const tbody = document.createElement("tbody");
+      trades.forEach(trItem => {
+        const tr = document.createElement("tr");
+
+        const tdSym = document.createElement("td");
+        tdSym.style.fontWeight = "600";
+        tdSym.textContent = trItem.symbol;
+        tr.appendChild(tdSym);
+
+        const tdCurr = document.createElement("td");
+        tdCurr.textContent = trItem.currency;
+        tr.appendChild(tdCurr);
+
+        const tdQty = document.createElement("td");
+        tdQty.textContent = trItem.quantity;
+        tr.appendChild(tdQty);
+
+        const tdBuy = document.createElement("td");
+        const buyVal = trItem.bought_at !== undefined ? trItem.bought_at : (trItem.entry_price || 0);
+        tdBuy.textContent = Number(buyVal).toFixed(2);
+        tr.appendChild(tdBuy);
+
+        const tdExit = document.createElement("td");
+        const exitVal = trItem.sold_at !== undefined ? trItem.sold_at : (trItem.exit_price || 0);
+        tdExit.textContent = Number(exitVal).toFixed(2);
+        tr.appendChild(tdExit);
+
+        const tdPnl = document.createElement("td");
+        const pnl = Number(trItem.net_pnl !== undefined ? trItem.net_pnl : (trItem.realized_pnl || 0));
+        tdPnl.textContent = (pnl >= 0 ? "+" : "") + pnl.toFixed(2);
+        tdPnl.style.fontWeight = "600";
+        tdPnl.style.color = pnl >= 0 ? "var(--success)" : "var(--danger)";
+        tr.appendChild(tdPnl);
+
+        const tdRet = document.createElement("td");
+        const ret = Number(trItem.pnl_pct !== undefined ? trItem.pnl_pct : (trItem.return_pct || 0));
+        tdRet.textContent = (ret >= 0 ? "+" : "") + ret.toFixed(2) + "%";
+        tdRet.style.color = ret >= 0 ? "var(--success)" : "var(--danger)";
+        tr.appendChild(tdRet);
+        tdRet.style.color = ret >= 0 ? "var(--success)" : "var(--danger)";
+        tr.appendChild(tdRet);
+
+        const tdReason = document.createElement("td");
+        const badge = document.createElement("span");
+        if (trItem.exit_reason === "TAKE_PROFIT_TRIGGERED") {
+          badge.className = "pill pill-green";
+          badge.textContent = "TAKE PROFIT";
+        } else if (trItem.exit_reason === "STOP_LOSS_TRIGGERED") {
+          badge.className = "pill pill-amber";
+          badge.textContent = "STOP LOSS";
+        } else {
+          badge.className = "pill pill-purple";
+          badge.textContent = trItem.exit_reason || "MANUAL";
+        }
+        tdReason.appendChild(badge);
+        tr.appendChild(tdReason);
+
+        const tdTime = document.createElement("td");
+        tdTime.style.color = "var(--text-dim)";
+        tdTime.style.fontSize = "0.75rem";
+        tdTime.textContent = (trItem.closed_at || "").slice(0, 19).replace("T", " ");
+        tr.appendChild(tdTime);
+
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      container.appendChild(table);
+    }
+
+    async function loadPnl() {
+      try {
+        const res = await fetch("/api/pnl");
+        if (!res.ok) return;
+        const data = await res.json();
+        renderPnlScorecard(data);
+        renderClosedTrades(data.closed_trades);
+      } catch (err) {
+        showStatus("Error loading P&L scorecard: " + err, true);
+      }
+    }
+
     async function refreshAll() {
       await fetchHealth();
       await loadPortfolio("INR");
       await loadPortfolio("USD");
+      await loadPnl();
     }
 
     document.getElementById("toggleKillBtn").addEventListener("click", toggleKillSwitch);
@@ -2444,6 +2806,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     document.getElementById("cycleSelect").addEventListener("change", (e) => {
       if (e.target.value) loadCycleDetail(e.target.value);
     });
+    document.getElementById("toggleGuideBtn").addEventListener("click", toggleGuide);
+    document.getElementById("presetNiftySafeBtn").addEventListener("click", () => selectPreset("nifty_safe"));
+    document.getElementById("presetItMoversBtn").addEventListener("click", () => selectPreset("it_movers"));
+    document.getElementById("presetUsLeadersBtn").addEventListener("click", () => selectPreset("us_leaders"));
+    document.getElementById("scenarioBullBtn").addEventListener("click", () => applyScenario("bull_rally"));
+    document.getElementById("scenarioCrashBtn").addEventListener("click", () => applyScenario("sudden_crash"));
+    document.getElementById("scenarioChopBtn").addEventListener("click", () => applyScenario("sideways_chop"));
+    document.getElementById("liveModeToggleBtn").addEventListener("click", toggleLiveMode);
 
     refreshAll();
     loadCycleList();

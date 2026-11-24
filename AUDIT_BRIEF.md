@@ -373,3 +373,31 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 - **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
 - **Secrets:** 0 leaks detected against `.secrets.baseline`.
 - **Inline `#` Comments:** 0 comments in git diff.
+
+---
+
+## 16. Milestone 12 — Unique Per-Symbol Pricing, Dynamic Gain/Loss Scorecard, Closed Trades History & Beginner-Guided UX (ADR-043), Verified 2026-11-24
+
+**Files:**
+- `src/agentic_trading/market_data/feed_bridge.py`
+- `src/agentic_trading/paper_trading/broker.py`
+- `src/agentic_trading/api/{schemas,state,routes,dashboard}.py`
+- `tests/test_m12_pnl_and_beginner_ux.py`
+- `tests/{test_m6_api_and_dashboard.py,test_m8_workstation_features.py,test_e2e_platform_audit.py}`
+
+| Area | Component | Behaviour & Hardening | Verification Test |
+|---|---|---|---|
+| Per-Symbol Pricing | `ReadOnlyMarketFeedBridge` | Realistic `_KNOWN_BASE_PRICES` dictionary (RELIANCE: 2940, TCS: 3860, INFY: 1840, HDFCBANK: 1720, ICICIBANK: 1290, SBIN: 830, AAPL: 228, MSFT: 425, NVDA: 138, GOOGL: 176, AMZN: 205; fallback SHA-256 derived 150..2500). Sinusoidal wave time index anchored to offset days (`t = 120 - offset_days + sim_step`), ensuring single-bar queries ($offset\_days=0$) evaluate to the exact same wave point as the latest bar of multi-candle queries. | `test_unique_per_symbol_pricing_and_deterministic_variation`, `test_feed_bridge_single_bar_matches_last_bar_of_series` |
+| Scenario Simulation | Practice Scenarios | `POST /api/sandbox/scenario` endpoint accepting `ScenarioRequest` (`bull_rally`, `sudden_crash`, `sideways_chop`). Advances simulation steps, updates mark prices, and triggers `sweep_positions` to automatically execute stop loss and take profit orders. | `test_scenario_endpoint_and_stop_loss_trigger` |
+| Gain/Loss Scorecard | Scorecard & Audit | `GET /api/pnl` endpoint returning `PnlSummaryResponse` with exact starting capital, total equity, net P&L, realized gains/losses, unrealized gains/losses, total fees paid, win rate, best/worst trade return, and closed trade audit trail. | `test_pnl_summary_endpoint_realized_and_unrealized` |
+| Closed Trades | Audit Trail | Position liquidations append `ClosedTradeRecord` with explicit exit reasons (`MANUAL_SELL`, `STOP_LOSS_TRIGGERED`, `TAKE_PROFIT_TRIGGERED`) and preserved cost-basis conservation ($residual == Decimal("0")$). | `test_closed_trades_history_recorded_on_manual_sell` |
+| Broker Monotonicity | Non-Decreasing Timestamps | Clamped `submitted_at = max(submitted_at, self.portfolio.ledger.entries[-1].timestamp)` in `broker.submit_order` to prevent out-of-order ledger rejections under mixed execution. | `tests/test_m8_workstation_features.py` |
+| Dashboard UI | Beginner Guided UX | Added collapsible Quick-Start Guide banner (`#beginnerGuideBanner`), dual-currency Gain/Loss scorecard cards (`#inrPnlCard`, `#usdPnlCard`), Watchlist Presets (`Nifty Safe`, `IT Movers`, `US Leaders`), Practice Scenario buttons, Closed Trades History table (`#closedTradesContainer`), and solid dark-bordered badge pills on Candlestick overlays. Maintained zero external CDN links and safe DOM creation via `document.createElement`. | `test_dashboard_ui_m12_elements_and_hygiene` |
+| Hygiene | Zero Inline Comments | Automated AST and tokenizer test verifying 0 inline `#` comments across all modified/new files. | `test_no_inline_comments_in_m12_files` |
+
+### Suite Verification:
+- **Pytest:** 531 passed on Python 3.11 (`.venv311`) and Python 3.14 (`.venv`).
+- **Coverage:** **>87%** (exceeds mandatory `--cov-fail-under=85`).
+- **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
+- **Secrets:** 0 leaks detected against `.secrets.baseline`.
+- **Inline `#` Comments:** 0 comments in git diff.

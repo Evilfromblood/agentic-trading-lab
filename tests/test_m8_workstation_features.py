@@ -138,6 +138,7 @@ def test_positions_list_and_close_position(tmp_path: Path) -> None:
         init_pos = client.get("/api/positions").json()
         assert init_pos["positions"] == []
 
+        feed_p = state.feed_bridge.fetch_candles(Exchange.NSE, "RELIANCE", bars_count=1).candles[-1].close
         order_resp = client.post(
             "/api/orders",
             json={
@@ -146,8 +147,8 @@ def test_positions_list_and_close_position(tmp_path: Path) -> None:
                 "symbol": "RELIANCE",
                 "side": "BUY",
                 "quantity": 10,
-                "quote_price": "100.00",
-                "stop_loss": "95.00",
+                "quote_price": str(feed_p),
+                "stop_loss": str((feed_p * Decimal("0.95")).quantize(Decimal("0.05"))),
                 "client_order_id": "cid-buy-pos",
             },
         )
@@ -265,6 +266,7 @@ def test_sandbox_reset(tmp_path: Path) -> None:
     )
     app = create_app(state=state)
     with TestClient(app) as client:
+        feed_p = state.feed_bridge.fetch_candles(Exchange.NSE, "RELIANCE", bars_count=1).candles[-1].close
         order_resp = client.post(
             "/api/orders",
             json={
@@ -273,8 +275,8 @@ def test_sandbox_reset(tmp_path: Path) -> None:
                 "symbol": "RELIANCE",
                 "side": "BUY",
                 "quantity": 5,
-                "quote_price": "100.00",
-                "stop_loss": "95.00",
+                "quote_price": str(feed_p),
+                "stop_loss": str((feed_p * Decimal("0.95")).quantize(Decimal("0.05"))),
                 "client_order_id": "cid-reset-buy",
             },
         )

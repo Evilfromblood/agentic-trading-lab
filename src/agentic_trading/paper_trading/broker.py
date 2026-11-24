@@ -212,6 +212,8 @@ class PaperBroker:
             currency = proposal.instrument.currency
             zero_money = Money(Decimal("0"), currency)
             submitted_at = current_candle.close_time
+            if self.portfolio.ledger.entries and submitted_at < self.portfolio.ledger.entries[-1].timestamp:
+                submitted_at = self.portfolio.ledger.entries[-1].timestamp
 
             if self.kill_switch.is_active():
                 order = PaperOrder(

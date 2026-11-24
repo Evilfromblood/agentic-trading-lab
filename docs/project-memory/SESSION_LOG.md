@@ -2,6 +2,32 @@
 
 Append concise entries in reverse chronological order. Record verified outcomes, not intentions.
 
+## 2026-11-24 — Unique Per-Symbol Pricing, Gain/Loss Scorecard, Closed Trades History & Beginner UX (ADR-043 / v1.4.0)
+- Implemented ADR-043 bringing realistic per-symbol market pricing, dynamic Gain/Loss scorecard, closed trades history, practice scenarios simulator, and beginner-guided workstation UX:
+  - **Deterministic Per-Symbol Market Pricing (`feed_bridge.py`)**:
+    - Created `_KNOWN_BASE_PRICES` dictionary (`RELIANCE`: 2940, `TCS`: 3860, `INFY`: 1840, `HDFCBANK`: 1720, `ICICIBANK`: 1290, `SBIN`: 830, `AAPL`: 228, `MSFT`: 425, `NVDA`: 138, `GOOGL`: 176, `AMZN`: 205, with SHA-256 fallback between 150 and 2500).
+    - Anchored sinusoidal wave time index to offset days (`t = 120 - offset_days + sim_step`), guaranteeing identical latest price evaluation regardless of requested bar count (1 vs. 120 bars).
+    - Added deterministic scenario biases (`normal`, `bull_rally`, `sudden_crash`, `sideways_chop`).
+  - **Practice Scenarios & Automated Position Sweep (`schemas.py`, `state.py`, `routes.py`)**:
+    - Added `POST /api/sandbox/scenario` endpoint accepting `ScenarioRequest`.
+    - Implemented `apply_scenario` advancing simulation steps and running `sweep_positions` to check mark prices against stop-loss and take-profit brackets.
+    - Automated market SELL execution when brackets trigger (`STOP_LOSS_TRIGGERED`, `TAKE_PROFIT_TRIGGERED`).
+  - **Dynamic Gain/Loss Scorecard & Closed Trades Audit (`schemas.py`, `state.py`, `routes.py`)**:
+    - Added `GET /api/pnl` endpoint returning `PnlSummaryResponse` with starting capital, total equity, net PnL, realized/unrealized gains, fees paid, win rate, and reversed closed trade records.
+    - Logged all manual and bracket-triggered position exits into `_closed_trades` with exact cost basis conservation ($residual == Decimal("0")$).
+  - **Broker Ledger Monotonicity (`broker.py`)**:
+    - Clamped `submitted_at = max(submitted_at, self.portfolio.ledger.entries[-1].timestamp)` in `broker.submit_order` to prevent out-of-order ledger rejections when mixed manual and auto-buy orders execute.
+  - **Beginner Workstation UX (`dashboard.py`)**:
+    - Added collapsible Quick-Start Guide banner (`#beginnerGuideBanner`) with 3-step walk-through.
+    - Added dual-currency Gain/Loss scorecard (`#inrPnlCard`, `#usdPnlCard`).
+    - Added Watchlist Presets (`Nifty Safe`, `IT Movers`, `US Leaders`) and Practice Scenario buttons.
+    - Added Closed Trades History table container (`#closedTradesContainer`).
+    - Upgraded Candlestick Chart AI overlays to solid dark-bordered badge pills (`drawBadgePill`).
+    - Maintained zero external CDN links and safe DOM manipulation via `document.createElement`.
+  - **Adversarial Test Suite (`tests/test_m12_pnl_and_beginner_ux.py`)**:
+    - Added 8 comprehensive tests covering per-symbol pricing, price consistency across bar queries, scenario simulation and bracket sweeps, PnL scorecard accuracy, closed trades audit recording, dashboard UI components, and zero inline `#` comments.
+    - All 531 tests passing across the entire test suite on Python 3.11 and Python 3.14 with >87% coverage.
+
 ## 2026-11-24 — Multi-Symbol Basket Backtester, Walk-Forward Parameter Optimizer & Trade Journal Export (ADR-042)
 - Implemented ADR-042 adding multi-symbol basket portfolio backtesting, walk-forward parameter optimization, and audit-ready trade journal export:
   - **Causal Multi-Symbol Basket Engine (`src/agentic_trading/time_machine/basket.py`)**:

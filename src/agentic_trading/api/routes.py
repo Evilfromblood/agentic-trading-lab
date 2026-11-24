@@ -26,10 +26,13 @@ from agentic_trading.api.schemas import (
     KillSwitchResponse,
     LessonsListResponse,
     OrderResponse,
+    PnlSummaryResponse,
     PortfolioSummaryResponse,
     PositionsListResponse,
     ResetSandboxRequest,
     ResetSandboxResponse,
+    ScenarioRequest,
+    ScenarioResponse,
     SubmitOrderRequest,
 )
 from agentic_trading.api.state import ProposalRiskRejectionError, TradingLabState
@@ -348,6 +351,7 @@ def add_lesson(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+
 @router.post("/sandbox/reset", response_model=ResetSandboxResponse)
 def reset_sandbox(
     payload: ResetSandboxRequest,
@@ -367,5 +371,33 @@ def reset_sandbox(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/sandbox/scenario", response_model=ScenarioResponse)
+def run_scenario(
+    payload: ScenarioRequest,
+    state: Annotated[TradingLabState, Depends(get_lab_state)],
+) -> ScenarioResponse:
+    if state.kill_switch.is_active():
+        reason = state.kill_switch.reason() or "Emergency kill switch is active"
+        raise HTTPException(status_code=409, detail=f"Scenario simulator rejected: {reason}")
+    try:
+        return state.apply_scenario(payload.scenario)
+    except KillSwitchError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/pnl", response_model=PnlSummaryResponse)
+def get_pnl(
+    state: Annotated[TradingLabState, Depends(get_lab_state)],
+) -> PnlSummaryResponse:
+    try:
+        return state.get_pnl_summary()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

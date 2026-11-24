@@ -253,7 +253,93 @@ class BacktestResponse(BaseModel):
     feed_source: str = Field(default="synthetic", max_length=64)
     strategy_name: str = Field(default="ema_pullback", max_length=64)
     equity_curve: list[dict[str, str]] = []
+    expectancy: Decimal = Decimal("0")
+    bars_evaluated: int = 0
+    total_return_pct: Decimal = Decimal("0")
+    sharpe_ratio: Decimal = Decimal("0")
+    max_drawdown_pct: Decimal = Decimal("0")
+    win_rate: Decimal = Decimal("0")
+    profit_factor: Decimal = Decimal("0")
+    total_trades: int = 0
+    mc_var_95_pct: Decimal = Decimal("0")
     paper_only: Literal[True] = True
+
+
+class ScenarioRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scenario: Literal["normal", "bull_rally", "sudden_crash", "sideways_chop"]
+
+
+class SweepTriggerEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str = Field(..., max_length=64)
+    exchange: str = Field(..., max_length=64)
+    currency: str = Field(..., max_length=64)
+    trigger_type: str = Field(..., max_length=64)
+    trigger_price: Decimal
+    mark_price: Decimal
+    quantity: int
+    net_pnl: Decimal
+    client_order_id: str = Field(..., max_length=64)
+
+
+class ScenarioResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scenario: Literal["normal", "bull_rally", "sudden_crash", "sideways_chop"]
+    sim_step: int
+    paper_only: Literal[True] = True
+    message: str = Field(..., max_length=512)
+    sweep_events: list[SweepTriggerEvent] = []
+
+
+class ClosedTradeRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str = Field(..., max_length=64)
+    exchange: str = Field(..., max_length=64)
+    currency: Literal["INR", "USD"]
+    quantity: int
+    bought_at: Decimal
+    sold_at: Decimal
+    net_pnl: Decimal
+    pnl_pct: Decimal
+    exit_reason: str = Field(..., max_length=64)
+    closed_at: str = Field(..., max_length=64)
+
+
+class PnlBreakdownItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    currency: Literal["INR", "USD"]
+    starting_capital: Decimal
+    current_equity: Decimal
+    net_pnl: Decimal
+    net_return_pct: Decimal
+    realized_pnl: Decimal
+    realized_gains: Decimal
+    realized_losses: Decimal
+    unrealized_pnl: Decimal
+    unrealized_gains: Decimal
+    unrealized_losses: Decimal
+    total_fees: Decimal
+    closed_trades_count: int
+    winning_trades: int
+    losing_trades: int
+    win_rate_pct: Decimal
+    best_trade_pnl: Decimal
+    worst_trade_pnl: Decimal
+
+
+class PnlSummaryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    paper_only: Literal[True] = True
+    inr: PnlBreakdownItem
+    usd: PnlBreakdownItem
+    closed_trades: list[ClosedTradeRecord] = []
 
 
 class BasketBacktestRequest(BaseModel):
