@@ -1,6 +1,6 @@
 # Next Actions
 
-Current priority: ADR-041 (SSRF-Hardened Live Fundamentals & Financial News Ingestion Adapters) is complete and verified. All milestones (M2a through M10, RC1, RC2, ADR-037 through ADR-041) are implemented, tested, and verified across Python 3.11 and Python 3.14. Tag `v1.2.0` ready.
+Current priority: ADR-042 (Multi-Symbol Basket Portfolio Backtester, Walk-Forward Parameter Optimizer & Trade Journal Export) is complete and verified. All milestones (M2a through M11, RC1, RC2, ADR-037 through ADR-042) are implemented, tested, and verified across Python 3.11 and Python 3.14. Tag `v1.3.0` ready.
 
 ## Immediate sequence
 1. Baseline M2a committed (`1b7e582`) and pushed to `origin/feature/reliable-foundation`.
@@ -63,6 +63,13 @@ Current priority: ADR-041 (SSRF-Hardened Live Fundamentals & Financial News Inge
 12. Auto-Buy Toggle, Trade Plans & Candlestick Chart (ADR-038): Plan preview, canvas candlestick overlays, 500 tests passing.
 13. Complete Workstation Upgrade (ADR-039): Strategy library (`ema_pullback`, `rsi_mean_reversion`, `atr_breakout`, `sma_cross`), open positions listing & liquidation (`/api/positions`, `/api/positions/close`), visual backtest equity curve with mousemove crosshair (`/api/backtest`), SQLite trading lessons manager (`/api/lessons`), safeguarded paper sandbox reset (`/api/sandbox/reset`), 507 tests passing with 88.35% coverage across Python 3.11 and Python 3.14. Tag `v1.0.0` ready.
 14. SSRF-Hardened Live Fundamentals & Financial News Ingestion Adapters (ADR-041): `ReadOnlyContextBridge` supporting `"synthetic"`, `"cache"`, and `"live"` modes; XML XXE entity/doctype defense; real fundamental ratios and sector news fed into `DataAnalyst` and `NewsAnalyst` with `data_quality="ok"`; automated earnings blackout enforcement (`EVENT_BLACKOUT`); `GET /api/context/{exchange}/{symbol}` endpoint; Context Source selector and Fundamental/Catalyst badges in Dashboard UI; 515 tests passing with 88.37% coverage across Python 3.11 and Python 3.14. Tag `v1.2.0` ready.
+15. Multi-Symbol Basket Backtester, Walk-Forward Parameter Optimizer & Trade Journal Export (ADR-042):
+   - Causal multi-symbol basket portfolio backtester (`run_basket_backtest`) simulating symbols sharing a single currency capital pool (`INR` or `USD`), sorting proposals by confidence, enforcing portfolio concentration limits, next-bar open execution, and verifying exact double-entry accounting conservation residual `== Decimal("0")`.
+   - Chronological 70/30 walk-forward parameter optimizer (`run_walk_forward_optimization`) searching parameter grids for `ema_pullback`, `rsi_mean_reversion`, `atr_breakout`, and `sma_cross` strategies and measuring out-of-sample robustness.
+   - Audit-ready trade journal export (`export_journal`) supporting JSON and CSV formats with spreadsheet formula injection protection.
+   - REST endpoints `POST /api/backtest/basket` and `GET /api/journal/export`.
+   - Interactive operator dashboard UI with `Run Basket & Walk-Forward` control, Walk-Forward metric cards, Per-Symbol Attribution table, and CSV/JSON export buttons.
+   - 523 tests passing with 87.73% coverage across Python 3.11 and Python 3.14. Tag `v1.3.0` ready.
 
 ## Review/remediation loop
 Claude independent verification -> ChatGPT triage and scoped technical direction -> Antigravity implementation and regression tests -> independent verification of the new snapshot. Avoid overlapping audits of unchanged code when a focused remediation cycle is more efficient.

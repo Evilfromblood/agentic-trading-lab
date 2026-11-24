@@ -5,7 +5,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from agentic_trading.agents.data_analyst import DataAnalyst
 from agentic_trading.agents.llm_client import (
@@ -26,6 +26,8 @@ from agentic_trading.api.schemas import (
     AgentChatEntry,
     BacktestRequest,
     BacktestResponse,
+    BasketBacktestRequest,
+    BasketBacktestResponse,
     CandleBarItem,
     ClosePositionRequest,
     ContextResponse,
@@ -38,6 +40,7 @@ from agentic_trading.api.schemas import (
     FundamentalSnapshotItem,
     NewsArticleItem,
     OrderResponse,
+    PerSymbolAttributionItem,
     PortfolioSummaryResponse,
     PositionItem,
     PositionsListResponse,
@@ -45,6 +48,7 @@ from agentic_trading.api.schemas import (
     ScheduledEventItem,
     SubmitOrderRequest,
     TradePlanItem,
+    WalkForwardSummary,
 )
 from agentic_trading.market_data.context_bridge import ReadOnlyContextBridge
 from agentic_trading.market_data.feed_bridge import ReadOnlyMarketFeedBridge
@@ -75,6 +79,7 @@ from agentic_trading.strategy.contracts import (
     TradeProposal,
 )
 from agentic_trading.strategy.library import STRATEGY_REGISTRY
+from agentic_trading.time_machine.basket import run_basket_backtest
 from agentic_trading.time_machine.engine import (
     BacktestConfig,
     BacktestEngine,
@@ -586,6 +591,125 @@ class TradingLabState:
             feed_source=fetch_res.source,
             strategy_name=request.strategy_name,
             equity_curve=equity_curve,
+        )
+
+    def run_basket_backtest(self, request: BasketBacktestRequest) -> BasketBacktestResponse:
+        exchange = Exchange(request.exchange)
+        currency = Currency(request.currency)
+
+        if exchange in {Exchange.NSE, Exchange.BSE} and currency != Currency.INR:
+            raise CurrencyMismatchError("NSE/BSE exchange requires INR currency")
+        if exchange in {Exchange.NYSE, Exchange.NASDAQ} and currency != Currency.USD:
+            raise CurrencyMismatchError("NYSE/NASDAQ exchange requires USD currency")
+
+        tick = Decimal("0.05") if currency == Currency.INR else Decimal("0.01")
+        instruments: list[Instrument] = []
+        candles_by_symbol: dict[str, list[Candle]] = {}
+
+        for sym in request.symbols:
+            clean_sym = sym.strip().upper()
+            inst = Instrument(
+                exchange=exchange,
+                symbol=clean_sym,
+                currency=currency,
+                tick_size=tick,
+                lot_size=1,
+            )
+            instruments.append(inst)
+            fetch_res = self.feed_bridge.fetch_candles(
+                exchange=exchange,
+                symbol=clean_sym,
+                interval=CandleInterval.D1,
+                bars_count=request.bars_count,
+                mode=request.feed_source,
+            )
+            candles_by_symbol[clean_sym] = list(fetch_res.candles)
+
+        fee_model = (
+            IndiaEquityFeeModel() if currency == Currency.INR else USEquityFeeModel()
+        )
+        slippage_model = BasisPointsSlippageModel()
+        risk_policy = (
+            self.inr_risk_policy if currency == Currency.INR else self.usd_risk_policy
+        )
+
+        config = BacktestConfig(
+            initial_capital=Money(request.initial_capital, currency),
+            risk_policy=risk_policy,
+            fee_model=fee_model,
+            slippage_model=slippage_model,
+            position_size_pct=Decimal("0.10"),
+            default_stop_loss_pct=Decimal("0.03"),
+            default_take_profit_pct=Decimal("0.06"),
+            random_seed=request.random_seed,
+        )
+
+        res = run_basket_backtest(
+            instruments=instruments,
+            candles_by_symbol=candles_by_symbol,
+            strategy_name=request.strategy_name,
+            config=config,
+            run_walk_forward=request.run_walk_forward,
+        )
+
+        metrics_dict: dict[str, Any] = {
+            "total_trades": res.portfolio_metrics.total_trades,
+            "winning_trades": res.portfolio_metrics.winning_trades,
+            "losing_trades": res.portfolio_metrics.losing_trades,
+            "win_rate_pct": str(res.portfolio_metrics.win_rate_pct),
+            "profit_factor": str(res.portfolio_metrics.profit_factor),
+            "total_return_pct": str(res.portfolio_metrics.total_return_pct),
+            "max_drawdown_pct": str(res.portfolio_metrics.max_drawdown_pct),
+            "sharpe_ratio": str(res.portfolio_metrics.sharpe_ratio),
+            "expectancy_r": str(res.portfolio_metrics.expectancy_r),
+        }
+
+        attribution_dict: dict[str, PerSymbolAttributionItem] = {}
+        for sym, attr in res.per_symbol_attribution.items():
+            attribution_dict[sym] = PerSymbolAttributionItem(
+                symbol=attr.symbol,
+                exchange=attr.exchange,
+                trades=attr.trades,
+                winning_trades=attr.winning_trades,
+                losing_trades=attr.losing_trades,
+                win_rate_pct=str(attr.win_rate_pct),
+                realized_pnl=str(attr.realized_pnl),
+                total_return_pct=str(attr.total_return_pct),
+            )
+
+        wf_summary: WalkForwardSummary | None = None
+        if res.walk_forward is not None:
+            wf_summary = WalkForwardSummary(
+                strategy_name=res.walk_forward.strategy_name,
+                best_params=res.walk_forward.best_params,
+                in_sample_metrics=res.walk_forward.in_sample_metrics,
+                out_of_sample_metrics=res.walk_forward.out_of_sample_metrics,
+                in_sample_range=res.walk_forward.in_sample_range,
+                out_of_sample_range=res.walk_forward.out_of_sample_range,
+                split_ratio=res.walk_forward.split_ratio,
+            )
+
+        equity_curve = [
+            {
+                "timestamp": pt.timestamp.isoformat(),
+                "equity": str(pt.total_equity.amount),
+                "drawdown_pct": str(pt.drawdown_pct),
+            }
+            for pt in res.equity_curve
+        ]
+
+        return BasketBacktestResponse(
+            manifest_id=res.manifest_id,
+            manifest_sha256=res.manifest_sha256,
+            manifest_verified=res.manifest_verified,
+            conservation_residual=res.conservation_residual,
+            strategy_name=request.strategy_name,
+            feed_source=request.feed_source,
+            portfolio_metrics=metrics_dict,
+            per_symbol_attribution=attribution_dict,
+            walk_forward_summary=wf_summary,
+            equity_curve=equity_curve,
+            trade_count=len(res.trades),
         )
 
     def run_desk(self, request: DeskRunRequest) -> DeskRunResponse:
@@ -1142,6 +1266,121 @@ class TradingLabState:
                 "message": "Sandbox reset successfully",
                 "paper_only": True,
             }
+
+    def export_journal(
+        self, format: Literal["json", "csv"] = "json", currency: str = "ALL"
+    ) -> dict[str, Any] | str:
+        with self._lock:
+            eff_curr = currency.strip().upper() if isinstance(currency, str) else "ALL"
+            if eff_curr == "INR":
+                brokers = [self.inr_broker]
+            elif eff_curr == "USD":
+                brokers = [self.usd_broker]
+            else:
+                brokers = [self.inr_broker, self.usd_broker]
+
+            ledger_items: list[dict[str, Any]] = []
+            order_items: list[dict[str, Any]] = []
+
+            for b in brokers:
+                for entry in b.portfolio.ledger.entries:
+                    ledger_items.append({
+                        "sequence_id": entry.sequence_id,
+                        "timestamp": entry.timestamp.isoformat(),
+                        "currency": entry.currency.value,
+                        "event_type": entry.event_type.value,
+                        "exchange": entry.exchange.value if entry.exchange else "",
+                        "symbol": entry.symbol or "",
+                        "quantity_delta": entry.quantity_delta,
+                        "execution_price": str(entry.execution_price.amount) if entry.execution_price else "",
+                        "cash_delta": str(entry.cash_delta.amount),
+                        "reference_id": entry.reference_id or "",
+                    })
+                for ord_obj in b.list_orders():
+                    order_items.append({
+                        "client_order_id": ord_obj.client_order_id,
+                        "run_id": ord_obj.run_id,
+                        "submitted_at": ord_obj.submitted_at.isoformat(),
+                        "filled_at": ord_obj.filled_at.isoformat() if ord_obj.filled_at else "",
+                        "exchange": ord_obj.exchange.value,
+                        "symbol": ord_obj.symbol,
+                        "side": ord_obj.side,
+                        "quantity": ord_obj.quantity,
+                        "filled_quantity": ord_obj.filled_quantity,
+                        "status": ord_obj.status.value,
+                        "average_fill_price": str(ord_obj.average_fill_price.amount) if ord_obj.average_fill_price else "",
+                        "fees": str(ord_obj.fees.amount),
+                        "slippage": str(ord_obj.slippage.amount),
+                        "reject_reason": ord_obj.reject_reason or "",
+                    })
+
+            ledger_items.sort(key=lambda x: (x["timestamp"], x["sequence_id"]))
+            order_items.sort(key=lambda x: x["submitted_at"])
+
+            if format == "json":
+                return {
+                    "paper_only": True,
+                    "exported_at": datetime.now(timezone.utc).isoformat(),
+                    "total_ledger_entries": len(ledger_items),
+                    "total_orders": len(order_items),
+                    "ledger_entries": ledger_items,
+                    "trade_orders": order_items,
+                }
+
+            def _clean(val: Any) -> str:
+                s = "" if val is None else str(val)
+                if s.startswith(("=", "+", "-", "@", "\t", "\r")):
+                    s = "'" + s
+                if '"' in s or "," in s or "\n" in s or "\r" in s:
+                    s = '"' + s.replace('"', '""') + '"'
+                return s
+
+            csv_lines = [
+                "SECTION,LEDGER_ENTRIES",
+                "Sequence,Timestamp,Currency,Event Type,Exchange,Symbol,Quantity Delta,Execution Price,Cash Delta,Reference ID",
+            ]
+            for item in ledger_items:
+                csv_lines.append(
+                    ",".join([
+                        _clean(item["sequence_id"]),
+                        _clean(item["timestamp"]),
+                        _clean(item["currency"]),
+                        _clean(item["event_type"]),
+                        _clean(item["exchange"]),
+                        _clean(item["symbol"]),
+                        _clean(item["quantity_delta"]),
+                        _clean(item["execution_price"]),
+                        _clean(item["cash_delta"]),
+                        _clean(item["reference_id"]),
+                    ])
+                )
+
+            csv_lines.append("")
+            csv_lines.append("SECTION,PAPER_ORDERS")
+            csv_lines.append(
+                "Client Order ID,Run ID,Submitted At,Filled At,Exchange,Symbol,Side,Quantity,Filled Quantity,Status,Avg Price,Fees,Slippage,Reject Reason"
+            )
+            for item in order_items:
+                csv_lines.append(
+                    ",".join([
+                        _clean(item["client_order_id"]),
+                        _clean(item["run_id"]),
+                        _clean(item["submitted_at"]),
+                        _clean(item["filled_at"]),
+                        _clean(item["exchange"]),
+                        _clean(item["symbol"]),
+                        _clean(item["side"]),
+                        _clean(item["quantity"]),
+                        _clean(item["filled_quantity"]),
+                        _clean(item["status"]),
+                        _clean(item["average_fill_price"]),
+                        _clean(item["fees"]),
+                        _clean(item["slippage"]),
+                        _clean(item["reject_reason"]),
+                    ])
+                )
+
+            return "\r\n".join(csv_lines)
 
     def close(self) -> None:
         pass

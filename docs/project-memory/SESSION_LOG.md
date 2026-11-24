@@ -2,6 +2,32 @@
 
 Append concise entries in reverse chronological order. Record verified outcomes, not intentions.
 
+## 2026-11-24 — Multi-Symbol Basket Backtester, Walk-Forward Parameter Optimizer & Trade Journal Export (ADR-042)
+- Implemented ADR-042 adding multi-symbol basket portfolio backtesting, walk-forward parameter optimization, and audit-ready trade journal export:
+  - **Causal Multi-Symbol Basket Engine (`src/agentic_trading/time_machine/basket.py`)**:
+    - Created `run_basket_backtest` simulating a basket of symbols (e.g. `["RELIANCE", "TCS", "INFY"]` or `["AAPL", "MSFT", "NVDA"]`) sharing a single currency capital pool (`INR` or `USD`).
+    - Aligned timestamps causally across all symbols, sorting pending buy proposals by signal confidence, enforcing `PortfolioRiskPolicy` concentration caps and volume participation, executing entries strictly at bar $t+1$ open, and processing intrabar stop-loss / take-profit exits on bar $t$ high/low.
+    - Verified exact double-entry accounting conservation: verified $\text{residual} == \text{Decimal}("0")$.
+    - Calculated per-symbol attribution metrics (`trades`, `win_rate_pct`, `realized_pnl`, `total_return_pct`).
+    - Keyed HMAC-SHA256 experiment manifest verification (`manifest_verified: True`).
+  - **Chronological Walk-Forward Parameter Optimizer (`src/agentic_trading/time_machine/basket.py`)**:
+    - Created `run_walk_forward_optimization` splitting historical candles into an in-sample training window (70%) and an untouched out-of-sample validation window (30%) with zero look-ahead leakage.
+    - Evaluated deterministic parameter grids across strategies (`ema_pullback`, `rsi_mean_reversion`, `atr_breakout`, `sma_cross`), selecting the optimal parameter set maximizing Sharpe ratio and return, and evaluating the out-of-sample window to report parameter robustness.
+  - **API Schemas, State & REST Endpoints (`schemas.py`, `state.py`, `routes.py`)**:
+    - Added `BasketBacktestRequest`, `PerSymbolAttributionItem`, `WalkForwardSummary`, `BasketBacktestResponse`, and `JournalExportResponse` with `extra="forbid"`.
+    - Implemented `TradingLabState.run_basket_backtest` and `TradingLabState.export_journal`.
+    - Neutralized CSV formula injection by prepending single quotes (`'`) to any text field starting with `=`, `+`, `-`, `@`, `\t`, or `\r`.
+    - Added REST endpoints `POST /api/backtest/basket` and `GET /api/journal/export`.
+  - **Dashboard Operator UI (`src/agentic_trading/api/dashboard.py`)**:
+    - Added `Run Basket & Walk-Forward` button in the header toolbar (`#runBasketBacktestBtn`).
+    - Added `Export CSV` and `Export JSON` download buttons (`#exportJournalCsvBtn`, `#exportJournalJsonBtn`).
+    - Added In-Sample vs. Out-of-Sample Walk-Forward summary cards (`#walkForwardGrid`).
+    - Added Per-Symbol Basket Attribution table (`#basketAttributionCard`) rendered dynamically via `document.createElement`.
+    - Maintained zero external CDN links and zero inline `#` comments.
+  - **Adversarial Test Suite (`tests/test_m11_basket_backtest_and_journal.py`)**:
+    - Added 8 tests covering direct basket engine simulation, standalone walk-forward optimization, REST API endpoint validation, concentration cap enforcement, JSON and CSV journal export, CSV formula injection defense, dashboard UI elements, and zero inline `#` comments.
+    - 523 total tests passing across Python 3.11 and Python 3.14 with 87.73% coverage.
+
 ## 2026-11-24 — SSRF-Hardened Live Fundamentals & Financial News Ingestion Adapters (ADR-041)
 - Implemented ADR-041 adding SSRF-hardened live fundamentals and financial news ingestion adapters:
   - **SSRF-Hardened Context Adapter (`context_bridge.py`)**:

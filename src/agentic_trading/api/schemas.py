@@ -256,6 +256,111 @@ class BacktestResponse(BaseModel):
     paper_only: Literal[True] = True
 
 
+class BasketBacktestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    symbols: list[str] = Field(default=["RELIANCE", "TCS", "INFY"], min_length=1, max_length=10)
+    exchange: Literal["NSE", "BSE", "NYSE", "NASDAQ"] = "NSE"
+    currency: Literal["INR", "USD"] = "INR"
+    initial_capital: Decimal = Decimal("1000000")
+    bars_count: int = Field(default=100, ge=20, le=500)
+    strategy_name: str = Field(default="ema_pullback", max_length=64)
+    feed_source: Literal["synthetic", "cache", "delayed_feed"] = "synthetic"
+    run_walk_forward: bool = True
+    random_seed: int = Field(default=42, ge=0)
+
+    @field_validator("symbols")
+    @classmethod
+    def validate_symbols(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("symbols list must not be empty")
+        cleaned: list[str] = []
+        for s in v:
+            c = s.strip().upper() if isinstance(s, str) else ""
+            if not c or len(c) > 32:
+                raise ValueError("symbol must be a non-empty string of max length 32")
+            if c not in cleaned:
+                cleaned.append(c)
+        return cleaned
+
+    @field_validator("strategy_name")
+    @classmethod
+    def validate_strategy_name(cls, v: str) -> str:
+        clean = v.strip().lower() if isinstance(v, str) else ""
+        if not clean:
+            raise ValueError("strategy_name must be non-empty")
+        allowed = {"ema_pullback", "rsi_mean_reversion", "atr_breakout", "sma_cross"}
+        if clean not in allowed:
+            raise ValueError(f"Unknown strategy_name '{v}'; supported: {sorted(allowed)}")
+        return clean
+
+    @field_validator("initial_capital", mode="before")
+    @classmethod
+    def validate_capital(cls, v: Any) -> Decimal:
+        return _check_finite_positive(v)
+
+    @field_validator("bars_count", mode="before")
+    @classmethod
+    def validate_bars(cls, v: Any) -> int:
+        count = _check_positive_int(v)
+        if count < 20 or count > 500:
+            raise ValueError("bars_count must be between 20 and 500")
+        return count
+
+
+class PerSymbolAttributionItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str
+    exchange: str
+    trades: int
+    winning_trades: int
+    losing_trades: int
+    win_rate_pct: str
+    realized_pnl: str
+    total_return_pct: str
+
+
+class WalkForwardSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    strategy_name: str
+    best_params: dict[str, Any]
+    in_sample_metrics: dict[str, Any]
+    out_of_sample_metrics: dict[str, Any]
+    in_sample_range: dict[str, str]
+    out_of_sample_range: dict[str, str]
+    split_ratio: str = "70/30"
+
+
+class BasketBacktestResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    manifest_id: str = Field(..., max_length=64)
+    manifest_sha256: str = Field(..., max_length=64)
+    manifest_verified: bool
+    conservation_residual: Decimal
+    strategy_name: str = Field(default="ema_pullback", max_length=64)
+    feed_source: str = Field(default="synthetic", max_length=64)
+    portfolio_metrics: dict[str, Any]
+    per_symbol_attribution: dict[str, PerSymbolAttributionItem]
+    walk_forward_summary: WalkForwardSummary | None = None
+    equity_curve: list[dict[str, str]] = []
+    trade_count: int
+    paper_only: Literal[True] = True
+
+
+class JournalExportResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    paper_only: Literal[True] = True
+    exported_at: str
+    total_ledger_entries: int
+    total_orders: int
+    ledger_entries: list[dict[str, Any]]
+    trade_orders: list[dict[str, Any]]
+
+
 class DeskRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

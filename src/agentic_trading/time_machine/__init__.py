@@ -1,6 +1,13 @@
 """Time Machine: causal backtesting, walk-forward validation, seeded Monte Carlo, manifests."""
 from __future__ import annotations
 
+from agentic_trading.time_machine.basket import (
+    BasketBacktestResult,
+    PerSymbolAttribution,
+    WalkForwardOptimizationResult,
+    run_basket_backtest,
+    run_walk_forward_optimization,
+)
 from agentic_trading.time_machine.engine import (
     BacktestConfig,
     BacktestEngine,
@@ -35,12 +42,15 @@ __all__ = [
     "BacktestEngine",
     "BacktestMetrics",
     "BacktestResult",
+    "BasketBacktestResult",
     "CompletedTrade",
     "CorporateActionConflictError",
     "EquityPoint",
     "ExperimentManifest",
     "LedgerConservationError",
     "MonteCarloSummary",
+    "PerSymbolAttribution",
+    "WalkForwardOptimizationResult",
     "WalkForwardResult",
     "WalkForwardWindow",
     "build_experiment_manifest",
@@ -48,8 +58,10 @@ __all__ = [
     "compute_benchmark_return_pct",
     "compute_dataset_sha256",
     "ledger_conservation_residual",
+    "run_basket_backtest",
     "run_seeded_monte_carlo",
     "run_train_test_split",
     "run_walk_forward",
+    "run_walk_forward_optimization",
     "verify_manifest_integrity",
 ]

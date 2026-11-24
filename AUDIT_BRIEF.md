@@ -346,3 +346,30 @@ Milestone 3 establishes the append-only ledger, multi-currency portfolio solvenc
 - **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
 - **Secrets:** 0 leaks detected against `.secrets.baseline`.
 - **Inline `#` Comments:** 0 comments in git diff.
+
+---
+
+## 15. Milestone 11 — Multi-Symbol Basket Portfolio Backtester, Walk-Forward Parameter Optimizer & Trade Journal Export (ADR-042), Verified 2026-11-24
+
+**Files:**
+- `src/agentic_trading/time_machine/basket.py`
+- `src/agentic_trading/time_machine/__init__.py`
+- `src/agentic_trading/api/{schemas,state,routes,dashboard}.py`
+- `tests/test_m11_basket_backtest_and_journal.py`
+
+| Area | Component | Behaviour & Hardening | Verification Test |
+|---|---|---|---|
+| Basket Backtester | `run_basket_backtest` | Causal multi-symbol basket portfolio simulation sharing a single currency capital pool (`INR` or `USD`). Proposals sorted descending by signal confidence, evaluated against dynamic portfolio snapshot, executing at bar $t+1$ open, checking intrabar stops/targets on bar $t$ high/low, and verifying exact double-entry accounting conservation residual `== Decimal("0")`. | `test_basket_backtest_direct_execution_and_conservation`, `test_basket_backtest_endpoint_and_state` |
+| Concentration | Risk Policy Caps | Single-position concentration cap (`max_position_fraction`) and volume participation caps enforced under concurrent symbol allocation. | `test_basket_backtest_concentration_cap_enforcement` |
+| Walk-Forward | Parameter Optimizer | Chronological 70% in-sample / 30% out-of-sample split with zero look-ahead leakage. Parameter grid search across `ema_pullback`, `rsi_mean_reversion`, `atr_breakout`, `sma_cross` strategies measuring out-of-sample robustness. | `test_walk_forward_optimization_standalone` |
+| Trade Journal | JSON & CSV Export | `GET /api/journal/export` exporting closed trades, open positions, order history, and ledger entries for INR and USD portfolios. | `test_journal_export_json_and_csv_endpoints` |
+| CSV Injection | Formula Sanitization | Spreadsheet formula injection defense neutralizing text fields starting with `=`, `+`, `-`, `@`, `\t`, or `\r` by prepending a single quote (`'`). | `test_csv_formula_injection_defense` |
+| Dashboard UI | Operator Controls | Added `Run Basket & Walk-Forward` button, `Export CSV` / `Export JSON` buttons, Walk-Forward summary cards (`#walkForwardGrid`), and Per-Symbol Attribution table (`#basketAttributionCard`) constructed safely via `document.createElement`. Zero external CDN links. | `test_dashboard_ui_m11_elements_and_hygiene` |
+| Hygiene | Zero Inline Comments | Automated AST and tokenizer test verifying 0 inline `#` comments across all modified/new files. | `test_no_inline_comments_in_m11_files` |
+
+### Suite Verification:
+- **Pytest:** 523 passed in 18.75s on Python 3.11 (`.venv311`), 523 passed in 13.78s on Python 3.14 (`.venv`).
+- **Coverage:** **87.73%** (exceeds mandatory `--cov-fail-under=85`).
+- **Ruff & Compileall:** All clean, exit code 0 on both 3.11 and 3.14.
+- **Secrets:** 0 leaks detected against `.secrets.baseline`.
+- **Inline `#` Comments:** 0 comments in git diff.

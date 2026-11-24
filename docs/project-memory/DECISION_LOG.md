@@ -730,3 +730,30 @@ Append decisions; do not silently rewrite historical decisions. Mark superseded 
   4. **Verification & Regression Suite (`tests/test_m10_fundamentals_and_news.py`):**
      - Added 8 comprehensive adversarial tests covering SSRF blocks, payload caps, XXE and entity expansion rejection, deterministic synthetic and HMAC cache loading, desk run integration with non-missing analyst ratings, earnings blackout enforcement, `/api/context` endpoint, and zero inline `#` comments.
 - **Consequences:** Enables genuine fundamental and news catalyst reasoning for the multi-agent trading desk while maintaining strict defense-in-depth isolation against SSRF, XXE, and prompt injection vectors.
+
+## ADR-042 (Multi-Symbol Basket Portfolio Backtester, Walk-Forward Parameter Optimizer & Trade Journal Export)
+- **Status:** Accepted (2026-11-24)
+- **Context:** Previously, the Time Machine backtesting engine was limited to single-symbol evaluation. To evaluate portfolio-level risk, cross-symbol cash sharing, and multi-symbol concentration caps across an entire watchlist, a causal multi-symbol basket engine was required. In addition, to prevent parameter overfitting, a chronological 70/30 walk-forward parameter optimizer was needed to validate out-of-sample robustness before deployment. Finally, human governance and post-session analysis required an immutable, formula-injection-safe trade journal export (CSV and JSON) across both INR and USD paper accounts.
+- **Decisions:**
+  1. **Causal Multi-Symbol Basket Engine (`src/agentic_trading/time_machine/basket.py`):**
+     - Implemented `run_basket_backtest` simulating a basket of symbols (e.g. `["RELIANCE", "TCS", "INFY"]` or `["AAPL", "MSFT", "NVDA"]`) sharing a single currency capital pool (`INR` or `USD`).
+     - Aligns timestamps causally across all symbols, sorting pending buy proposals by signal confidence, enforcing `PortfolioRiskPolicy` (single-position concentration cap, volume participation cap, and available cash), executing entries strictly at bar $t+1$ open, and processing stop-loss / take-profit exits bar-by-bar with zero look-ahead.
+     - Preserves exact double-entry accounting conservation: verified $\text{residual} == \text{Decimal}("0")$.
+     - Generates per-symbol attribution metrics (`trades`, `win_rate_pct`, `realized_pnl`, `total_return_pct`).
+     - Seals simulation parameters in an HMAC-verified manifest digest (`manifest_verified: True`).
+  2. **Chronological Walk-Forward Parameter Optimizer (`src/agentic_trading/time_machine/basket.py`):**
+     - Implemented `run_walk_forward_optimization` splitting historical candles into an in-sample training window (70%) and an untouched out-of-sample validation window (30%) with zero look-ahead leakage.
+     - Evaluates deterministic parameter grids for the selected strategy (`ema_pullback`, `rsi_mean_reversion`, `atr_breakout`, `sma_cross`), selects the optimal parameter set maximizing Sharpe ratio and return, and evaluates the untouched out-of-sample window to report parameter robustness.
+  3. **REST Endpoints & State Integration (`src/agentic_trading/api/{schemas,state,routes}.py`):**
+     - Added endpoint `POST /api/backtest/basket` accepting `BasketBacktestRequest` with `extra="forbid"`, returning `BasketBacktestResponse` (`paper_only: True`).
+     - Added endpoint `GET /api/journal/export` supporting `format: Literal["json", "csv"] = "json"`.
+     - Neutralized CSV formula injection by prepending single quotes (`'`) to any text field starting with `=`, `+`, `-`, `@`, `\t`, or `\r`.
+  4. **Interactive Dashboard UI (`src/agentic_trading/api/dashboard.py`):**
+     - Added `Run Basket & Walk-Forward` button in the header toolbar (`#runBasketBacktestBtn`).
+     - Added `Export CSV` and `Export JSON` download buttons (`#exportJournalCsvBtn`, `#exportJournalJsonBtn`).
+     - Added In-Sample vs. Out-of-Sample Walk-Forward summary cards (`#walkForwardGrid`).
+     - Added Per-Symbol Basket Attribution table (`#basketAttributionCard`) rendered dynamically via `document.createElement`.
+     - Maintained zero external CDN links and zero inline `#` comments.
+  5. **Adversarial Test Suite (`tests/test_m11_basket_backtest_and_journal.py`):**
+     - Added 8 tests covering direct basket engine simulation, standalone walk-forward optimization, REST API endpoint validation, concentration cap enforcement, JSON and CSV journal export, CSV formula injection defense, dashboard UI elements, and zero inline `#` comments.
+- **Consequences:** Enables portfolio-level multi-asset backtesting and walk-forward parameter robustness validation while providing audit-ready, formula-injection-safe trade journal exports.

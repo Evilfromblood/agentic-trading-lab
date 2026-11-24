@@ -633,12 +633,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           <span id="autoBuyLabel" class="switch-label">Auto-Buy ON</span>
         </label>
         <button id="runBacktestBtn" class="btn btn-secondary">Run Backtest</button>
+        <button id="runBasketBacktestBtn" class="btn btn-primary">Run Basket &amp; Walk-Forward</button>
         <select id="backtestStrategySelect" style="background:#0f172a;color:var(--text);border:1px solid var(--border);padding:6px 10px;border-radius:6px;font-size:0.83rem;">
           <option value="ema_pullback" selected>EMA Pullback (9/21)</option>
           <option value="rsi_mean_reversion">RSI Mean Reversion (14)</option>
           <option value="atr_breakout">ATR Breakout (20)</option>
           <option value="sma_cross">SMA Cross (5/15)</option>
         </select>
+        <button id="exportJournalCsvBtn" class="btn btn-ghost" title="Export Ledger &amp; Trade Journal as CSV">Export CSV</button>
+        <button id="exportJournalJsonBtn" class="btn btn-ghost" title="Export Ledger &amp; Trade Journal as JSON">Export JSON</button>
         <button id="toggleSettingsBtn" class="btn btn-ghost">Settings ▾</button>
       </div>
       <div id="settingsPanel" class="settings-panel" style="display: none;">
@@ -803,6 +806,30 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           <div class="metric-row"><span class="metric-name">Bars Evaluated</span><span class="metric-num" id="backtestBars">—</span></div>
         </div>
       </div>
+      <div id="walkForwardGrid" class="overview-grid" style="margin-bottom:16px; display:none;">
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">In-Sample Training (70%)</span>
+            <span class="pill pill-blue">In-Sample</span>
+          </div>
+          <div class="metric-row"><span class="metric-name">Total Return</span><span class="metric-num" id="wfInReturn">—</span></div>
+          <div class="metric-row"><span class="metric-name">Sharpe Ratio</span><span class="metric-num" id="wfInSharpe">—</span></div>
+          <div class="metric-row"><span class="metric-name">Max Drawdown</span><span class="metric-num" id="wfInDrawdown">—</span></div>
+          <div class="metric-row"><span class="metric-name">Win Rate</span><span class="metric-num" id="wfInWinRate">—</span></div>
+          <div class="metric-row"><span class="metric-name">Total Trades</span><span class="metric-num" id="wfInTrades">—</span></div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">Out-of-Sample Validation (30%)</span>
+            <span class="pill pill-success">Untouched</span>
+          </div>
+          <div class="metric-row"><span class="metric-name">Total Return</span><span class="metric-num" id="wfOutReturn">—</span></div>
+          <div class="metric-row"><span class="metric-name">Sharpe Ratio</span><span class="metric-num" id="wfOutSharpe">—</span></div>
+          <div class="metric-row"><span class="metric-name">Max Drawdown</span><span class="metric-num" id="wfOutDrawdown">—</span></div>
+          <div class="metric-row"><span class="metric-name">Win Rate</span><span class="metric-num" id="wfOutWinRate">—</span></div>
+          <div class="metric-row"><span class="metric-name">Optimal Parameters</span><span class="metric-num" id="wfBestParams" style="font-size:0.75rem;">—</span></div>
+        </div>
+      </div>
       <div class="card" style="margin-bottom:16px;">
         <div class="card-head">
           <div class="section-title" style="margin-bottom:0;">Equity Curve · Time Machine</div>
@@ -814,6 +841,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div style="position:relative; width:100%; height:280px; margin-top:8px;">
           <canvas id="equityCurveCanvas" width="1080" height="280" style="width:100%; height:280px; display:block; border-radius:6px; background:#0b1120;"></canvas>
         </div>
+      </div>
+      <div class="card" id="basketAttributionCard" style="margin-bottom:16px; display:none;">
+        <div class="card-head">
+          <div class="section-title" style="margin-bottom:0;">Per-Symbol Basket Attribution</div>
+          <span id="basketSymbolCountBadge" class="pill pill-blue">Attribution</span>
+        </div>
+        <div id="basketAttributionContainer" style="margin-top:12px;"></div>
       </div>
     </div>
 
@@ -2234,6 +2268,145 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       }
     }
 
+    async function runBasketBacktest() {
+      const market = document.getElementById("marketSelect").value;
+      const currency = (market === "NSE") ? "INR" : "USD";
+      const exchange = market;
+      const rawWl = document.getElementById("watchlistInput").value;
+      const symbols = rawWl.split(",").map(s => s.trim().toUpperCase()).filter(Boolean);
+      const feedSource = document.getElementById("feedSourceSelect").value;
+      const strategyName = document.getElementById("backtestStrategySelect").value;
+      const initialCapital = (currency === "INR") ? "1000000" : "25000";
+
+      showStatus("Executing Basket & Walk-Forward backtest (" + symbols.join(", ") + ")...", false);
+      try {
+        const res = await fetch("/api/backtest/basket", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            symbols: symbols.length > 0 ? symbols : (market === "NSE" ? ["RELIANCE", "TCS", "INFY"] : ["AAPL", "MSFT", "NVDA"]),
+            exchange: exchange,
+            currency: currency,
+            initial_capital: initialCapital,
+            bars_count: 100,
+            strategy_name: strategyName,
+            feed_source: feedSource,
+            run_walk_forward: true
+          })
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          showStatus("Basket backtest failed: " + (err.detail || res.statusText), true);
+          return;
+        }
+        const data = await res.json();
+
+        document.getElementById("backtestStrategyBadge").textContent = (data.strategy_name || strategyName) + " · Basket";
+        document.getElementById("backtestNetReturn").textContent = data.portfolio_metrics.total_return_pct + "%";
+        document.getElementById("backtestNetReturn").style.color = Number(data.portfolio_metrics.total_return_pct) >= 0 ? "var(--success)" : "var(--danger)";
+        document.getElementById("backtestSharpe").textContent = String(data.portfolio_metrics.sharpe_ratio);
+        document.getElementById("backtestDrawdown").textContent = data.portfolio_metrics.max_drawdown_pct + "%";
+        document.getElementById("backtestWinRate").textContent = data.portfolio_metrics.win_rate_pct + "%";
+        document.getElementById("backtestTradesCount").textContent = String(data.trade_count);
+        document.getElementById("backtestVar").textContent = "—";
+        document.getElementById("backtestProfitFactor").textContent = String(data.portfolio_metrics.profit_factor);
+        document.getElementById("backtestExpectancy").textContent = String(data.portfolio_metrics.expectancy_r) + " R";
+        document.getElementById("backtestBars").textContent = String(data.portfolio_metrics.total_trades);
+
+        const wfGrid = document.getElementById("walkForwardGrid");
+        if (data.walk_forward_summary) {
+          wfGrid.style.display = "grid";
+          const inM = data.walk_forward_summary.in_sample_metrics;
+          const outM = data.walk_forward_summary.out_of_sample_metrics;
+          document.getElementById("wfInReturn").textContent = inM.total_return_pct + "%";
+          document.getElementById("wfInSharpe").textContent = inM.sharpe_ratio;
+          document.getElementById("wfInDrawdown").textContent = inM.max_drawdown_pct + "%";
+          document.getElementById("wfInWinRate").textContent = inM.win_rate_pct + "%";
+          document.getElementById("wfInTrades").textContent = String(inM.total_trades);
+
+          document.getElementById("wfOutReturn").textContent = outM.total_return_pct + "%";
+          document.getElementById("wfOutReturn").style.color = Number(outM.total_return_pct) >= 0 ? "var(--success)" : "var(--danger)";
+          document.getElementById("wfOutSharpe").textContent = outM.sharpe_ratio;
+          document.getElementById("wfOutDrawdown").textContent = outM.max_drawdown_pct + "%";
+          document.getElementById("wfOutWinRate").textContent = outM.win_rate_pct + "%";
+          document.getElementById("wfBestParams").textContent = JSON.stringify(data.walk_forward_summary.best_params);
+        } else {
+          wfGrid.style.display = "none";
+        }
+
+        const attrCard = document.getElementById("basketAttributionCard");
+        const attrContainer = document.getElementById("basketAttributionContainer");
+        while (attrContainer.firstChild) attrContainer.removeChild(attrContainer.firstChild);
+
+        if (data.per_symbol_attribution && Object.keys(data.per_symbol_attribution).length > 0) {
+          attrCard.style.display = "block";
+          document.getElementById("basketSymbolCountBadge").textContent = Object.keys(data.per_symbol_attribution).length + " Symbols";
+
+          const table = document.createElement("table");
+          table.className = "table";
+          const thead = document.createElement("thead");
+          const trHead = document.createElement("tr");
+          ["Symbol", "Exchange", "Trades", "Win Rate", "Realized PnL", "Return %"].forEach(h => {
+            const th = document.createElement("th");
+            th.textContent = h;
+            trHead.appendChild(th);
+          });
+          thead.appendChild(trHead);
+          table.appendChild(thead);
+
+          const tbody = document.createElement("tbody");
+          for (const sym of Object.keys(data.per_symbol_attribution)) {
+            const item = data.per_symbol_attribution[sym];
+            const tr = document.createElement("tr");
+
+            const tdSym = document.createElement("td");
+            tdSym.style.fontWeight = "600";
+            tdSym.textContent = item.symbol;
+            tr.appendChild(tdSym);
+
+            const tdEx = document.createElement("td");
+            tdEx.textContent = item.exchange;
+            tr.appendChild(tdEx);
+
+            const tdTr = document.createElement("td");
+            tdTr.textContent = String(item.trades);
+            tr.appendChild(tdTr);
+
+            const tdWr = document.createElement("td");
+            tdWr.textContent = item.win_rate_pct + "%";
+            tr.appendChild(tdWr);
+
+            const tdPnl = document.createElement("td");
+            tdPnl.textContent = formatMoney(item.realized_pnl, currency);
+            tdPnl.style.color = Number(item.realized_pnl) >= 0 ? "var(--success)" : "var(--danger)";
+            tr.appendChild(tdPnl);
+
+            const tdRet = document.createElement("td");
+            tdRet.textContent = item.total_return_pct + "%";
+            tdRet.style.color = Number(item.total_return_pct) >= 0 ? "var(--success)" : "var(--danger)";
+            tr.appendChild(tdRet);
+
+            tbody.appendChild(tr);
+          }
+          table.appendChild(tbody);
+          attrContainer.appendChild(table);
+        } else {
+          attrCard.style.display = "none";
+        }
+
+        renderEquityCurve(data.equity_curve, data.portfolio_metrics);
+        switchTab("backtest");
+        showStatus("Basket backtest completed (" + data.trade_count + " total trades, residual: " + data.conservation_residual + ")", false);
+        await refreshAll();
+      } catch (err) {
+        showStatus("Basket backtest error: " + err, true);
+      }
+    }
+
+    function exportJournal(fmt) {
+      window.open("/api/journal/export?format=" + encodeURIComponent(fmt), "_blank");
+    }
+
     async function refreshAll() {
       await fetchHealth();
       await loadPortfolio("INR");
@@ -2259,6 +2432,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     });
     document.getElementById("runDeskBtn").addEventListener("click", runDeskCycle);
     document.getElementById("runBacktestBtn").addEventListener("click", runBacktest);
+    document.getElementById("runBasketBacktestBtn").addEventListener("click", runBasketBacktest);
+    document.getElementById("exportJournalCsvBtn").addEventListener("click", () => exportJournal("csv"));
+    document.getElementById("exportJournalJsonBtn").addEventListener("click", () => exportJournal("json"));
     document.getElementById("toggleSettingsBtn").addEventListener("click", toggleSettings);
     document.getElementById("tabOverviewBtn").addEventListener("click", () => switchTab("overview"));
     document.getElementById("tabChatBtn").addEventListener("click", () => switchTab("chat"));

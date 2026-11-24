@@ -4,12 +4,15 @@ from __future__ import annotations
 import re
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
 
 from agentic_trading.api.schemas import (
     AddLessonRequest,
     BacktestRequest,
     BacktestResponse,
+    BasketBacktestRequest,
+    BasketBacktestResponse,
     ClosePositionRequest,
     ContextResponse,
     CycleDetailResponse,
@@ -144,6 +147,36 @@ def run_backtest(
     try:
         return state.run_backtest(payload)
     except (CurrencyMismatchError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/backtest/basket", response_model=BasketBacktestResponse)
+def run_basket_backtest(
+    payload: BasketBacktestRequest,
+    state: Annotated[TradingLabState, Depends(get_lab_state)],
+) -> BasketBacktestResponse:
+    try:
+        return state.run_basket_backtest(payload)
+    except (CurrencyMismatchError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/journal/export")
+def export_journal(
+    state: Annotated[TradingLabState, Depends(get_lab_state)],
+    format: Literal["json", "csv"] = Query("json"),
+    currency: Literal["ALL", "INR", "USD"] = Query("ALL"),
+) -> Response:
+    try:
+        data = state.export_journal(format=format, currency=currency)
+        if format == "csv":
+            return Response(
+                content=data,
+                media_type="text/csv",
+                headers={"Content-Disposition": 'attachment; filename="trade_journal.csv"'},
+            )
+        return JSONResponse(content=data)
+    except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
